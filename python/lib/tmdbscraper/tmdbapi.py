@@ -106,6 +106,12 @@ def get_movie(mid, language=None, append_to_response=None):
     api_utils.set_headers(dict(HEADERS))
     return api_utils.load_info(theurl, params=_set_params(append_to_response, language))
 
+def get_movie_request(mid, language=None, append_to_response=None):
+    log('using movie id of %s to get movie details' % mid)
+    theurl = MOVIE_URL.format(mid)
+    return {'url': theurl, 'params': _set_params(append_to_response, language), 'headers': dict(HEADERS), 'type': 'tmdb'}
+
+
 
 def get_collection(collection_id, language=None, append_to_response=None):
     # type: (Text) -> List[InfoType]

@@ -62,6 +62,70 @@ class TMDBMovieScraper(object):
                 item['backdrop_path'] = urls['preview'] + item['backdrop_path']
         return result
 
+    def get_movie_requests(self, media_id):
+        from . import tmdbapi
+        details_lang = 'trailers,images,releases,casts,keywords'
+        details_fallback = 'trailers,images'
+        
+        req_movie = {
+            'url': tmdbapi.MOVIE_URL.format(media_id),
+            'params': tmdbapi._set_params(details_lang, self.language),
+            'headers': dict(tmdbapi.HEADERS),
+            'type': 'tmdb_movie',
+            'id': media_id
+        }
+        req_fallback = {
+            'url': tmdbapi.MOVIE_URL.format(media_id),
+            'params': tmdbapi._set_params(details_fallback, None),
+            'headers': dict(tmdbapi.HEADERS),
+            'type': 'tmdb_movie_fallback',
+            'id': media_id
+        }
+        return [req_movie, req_fallback]
+
+    def get_collection_requests(self, collection_id):
+        from . import tmdbapi
+        details_col = 'images'
+        req_col = {
+            'url': tmdbapi.COLLECTION_URL.format(collection_id),
+            'params': tmdbapi._set_params(details_col, self.language),
+            'headers': dict(tmdbapi.HEADERS),
+            'type': 'tmdb_collection',
+            'id': collection_id
+        }
+        req_col_fallback = {
+            'url': tmdbapi.COLLECTION_URL.format(collection_id),
+            'params': tmdbapi._set_params(details_col, None),
+            'headers': dict(tmdbapi.HEADERS),
+            'type': 'tmdb_collection_fallback',
+            'id': collection_id
+        }
+        return [req_col, req_col_fallback]
+
+    def parse_movie_response(self, responses):
+        # responses is a dict of {type: result}
+        # result is the json object or error dict
+        
+        movie = responses.get('tmdb_movie')
+        movie_fallback = responses.get('tmdb_movie_fallback')
+        
+        if not movie or movie.get('error'):
+            return movie
+            
+        if not movie_fallback or movie_fallback.get('error'):
+            movie_fallback = {}
+
+        movie['images'] = movie_fallback.get('images', {})
+
+        # Handle Collections
+        collection = responses.get('tmdb_collection')
+        collection_fallback = responses.get('tmdb_collection_fallback')
+        
+        if collection and collection_fallback and 'images' in collection_fallback:
+            collection['images'] = collection_fallback['images']
+
+        return self._assemble_details(movie, movie_fallback, collection, collection_fallback)
+
     def get_details(self, uniqueids):
         media_id = uniqueids.get('tmdb')
         if not media_id:
@@ -86,18 +150,92 @@ class TMDBMovieScraper(object):
         return self._assemble_details(**details)
 
     def _gather_details(self, media_id):
-        movie = _get_movie(media_id, self.language)
+        # Prepare batch requests
+        # 1. Movie details (Language)
+        # 2. Movie details (Fallback/English)
+        
+        # We need to fetch movie details first to know if there is a collection
+        # But we can fetch movie and movie_fallback in parallel
+        
+        # Construct batch payload
+        # Using internal knowledge of tmdbapi to construct requests
+        # This is a bit of a hack but necessary for batching without rewriting everything
+        
+        from . import tmdbapi
+        from . import api_utils
+        import json
+        
+        # Prepare requests for movie and fallback
+        # IMPORTANT: We must include 'append_to_response' parameters to get casts, images, etc.
+        # See _get_movie helper function for what is needed
+        
+        details_lang = 'trailers,images,releases,casts,keywords'
+        details_fallback = 'trailers,images'
+        
+        req_movie = {
+            'url': tmdbapi.MOVIE_URL.format(media_id),
+            'params': tmdbapi._set_params(details_lang, self.language),
+            'headers': dict(tmdbapi.HEADERS)
+        }
+        req_fallback = {
+            'url': tmdbapi.MOVIE_URL.format(media_id),
+            'params': tmdbapi._set_params(details_fallback, None),
+            'headers': dict(tmdbapi.HEADERS)
+        }
+        
+        # Execute batch
+        batch_results = api_utils.load_info_from_service(None, batch_payload=[req_movie, req_fallback])
+        
+        if isinstance(batch_results, dict) and 'error' in batch_results:
+             # Fallback to sequential if service fails
+             movie = _get_movie(media_id, self.language)
+             movie_fallback = _get_movie(media_id)
+        else:
+             # Process batch results
+             def process_result(res):
+                 if res.get('json'):
+                     return res['json']
+                 return json.loads(res.get('text', '{}'))
+                 
+             movie = process_result(batch_results[0])
+             movie_fallback = process_result(batch_results[1])
+
         if not movie or movie.get('error'):
             return movie
 
-        # don't specify language to get English text for fallback
-        movie_fallback = _get_movie(media_id)
-        movie['images'] = movie_fallback['images']
+        movie['images'] = movie_fallback.get('images', {})
 
-        collection = _get_moviecollection(movie['belongs_to_collection'].get('id'), self.language) if \
-            movie['belongs_to_collection'] else None
-        collection_fallback = _get_moviecollection(movie['belongs_to_collection'].get('id')) if \
-            movie['belongs_to_collection'] else None
+        # Handle Collections
+        collection_id = movie.get('belongs_to_collection', {}).get('id') if movie.get('belongs_to_collection') else None
+        
+        collection = None
+        collection_fallback = None
+        
+        if collection_id:
+            # Batch fetch collection info
+            # See _get_moviecollection helper
+            details_col = 'images'
+            
+            req_col = {
+                'url': tmdbapi.COLLECTION_URL.format(collection_id),
+                'params': tmdbapi._set_params(details_col, self.language),
+                'headers': dict(tmdbapi.HEADERS)
+            }
+            req_col_fallback = {
+                'url': tmdbapi.COLLECTION_URL.format(collection_id),
+                'params': tmdbapi._set_params(details_col, None),
+                'headers': dict(tmdbapi.HEADERS)
+            }
+            
+            batch_col_results = api_utils.load_info_from_service(None, batch_payload=[req_col, req_col_fallback])
+            
+            if isinstance(batch_col_results, dict) and 'error' in batch_col_results:
+                collection = _get_moviecollection(collection_id, self.language)
+                collection_fallback = _get_moviecollection(collection_id)
+            else:
+                collection = process_result(batch_col_results[0])
+                collection_fallback = process_result(batch_col_results[1])
+
         if collection and collection_fallback and 'images' in collection_fallback:
             collection['images'] = collection_fallback['images']
 

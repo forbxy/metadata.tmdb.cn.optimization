@@ -108,3 +108,24 @@ msgstr ""
 msgctxt "#30999"
 msgid "Fanart.tv"
 msgstr "Fanart.tv"
+
+msgctxt "#32000"
+msgid "DNS Resolution"
+msgstr "DNS Resolution"
+
+msgctxt "#32001"
+msgid "api.themoviedb.org"
+msgstr "api.themoviedb.org"
+
+msgctxt "#32002"
+msgid "webservice.fanart.tv"
+msgstr "webservice.fanart.tv"
+
+msgctxt "#32003"
+msgid "www.imdb.com"
+msgstr "www.imdb.com"
+
+msgctxt "#32004"
+msgid "trakt.tv"
+msgstr "trakt.tv"
+

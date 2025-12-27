@@ -102,6 +102,9 @@ class PathSpecificSettings(object):
     def getSettingString(self, id):
         return self._inner_get_setting(id, basestring, '')
 
+    def setSetting(self, id, value):
+        self.data[id] = value
+
     def _inner_get_setting(self, setting_id, setting_type, default):
         value = self.data.get(setting_id)
         if isinstance(value, setting_type):

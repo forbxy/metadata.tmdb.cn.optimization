@@ -37,6 +37,28 @@ HEADERS = (
     ('Accept', 'application/json'),
 )
 
+def get_movie_requests(uniqueids):
+    imdb_id = get_imdb_id(uniqueids)
+    if not imdb_id:
+        return []
+    
+    return [{
+        'url': IMDB_RATINGS_URL.format(imdb_id),
+        'headers': dict(HEADERS),
+        'type': 'imdb_rating',
+        'id': imdb_id,
+        'resp_type': 'text'
+    }]
+
+def parse_movie_response(responses):
+    response = responses.get('imdb_rating')
+    if not response:
+        return {}
+    
+    # response is text because we set resp_type='text' in request
+    votes, rating, top250 = _parse_imdb_result(response)
+    return _assemble_imdb_result(votes, rating, top250)
+
 def get_details(uniqueids):
     imdb_id = get_imdb_id(uniqueids)
     if not imdb_id:

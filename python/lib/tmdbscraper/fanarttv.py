@@ -25,6 +25,55 @@ HEADERS = (
 )
 
 
+def get_movie_requests(uniqueids, clientkey, set_tmdbid):
+    media_id = _get_mediaid(uniqueids)
+    if not media_id:
+        return []
+    
+    headers = dict(HEADERS)
+    if clientkey:
+        headers['client-key'] = clientkey
+    
+    reqs = []
+    reqs.append({
+        'url': API_URL.format(media_id),
+        'headers': headers,
+        'type': 'fanart_movie',
+        'id': media_id
+    })
+    
+    if set_tmdbid:
+        reqs.append({
+            'url': API_URL.format(set_tmdbid),
+            'headers': headers,
+            'type': 'fanart_collection',
+            'id': set_tmdbid
+        })
+        
+    return reqs
+
+
+def parse_movie_response(responses, language):
+    movie_data = responses.get('fanart_movie')
+    movieset_data = responses.get('fanart_collection')
+    
+    if not movie_data and not movieset_data:
+        return {}
+
+    movie_art = {}
+    movieset_art = {}
+    if movie_data:
+        movie_art = _parse_data(movie_data, language)
+    if movieset_data:
+        movieset_art = _parse_data(movieset_data, language)
+        movieset_art = {'set.' + key: value for key, value in movieset_art.items()}
+
+    available_art = movie_art
+    available_art.update(movieset_art)
+
+    return {'available_art': available_art}
+
+
 def get_details(uniqueids, clientkey, language, set_tmdbid):
     media_id = _get_mediaid(uniqueids)
     if not media_id:

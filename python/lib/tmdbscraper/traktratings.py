@@ -40,6 +40,31 @@ HEADERS = (
 MOVIE_URL = 'https://api.trakt.tv/movies/{}'
 
 
+def get_movie_requests(uniqueids):
+    imdb_id = get_imdb_id(uniqueids)
+    if not imdb_id:
+        return []
+    
+    return [{
+        'url': MOVIE_URL.format(imdb_id),
+        'params': {'extended': 'full'},
+        'headers': dict(HEADERS),
+        'type': 'trakt_rating',
+        'id': imdb_id
+    }]
+
+
+def parse_movie_response(responses):
+    movie_info = responses.get('trakt_rating')
+    result = {}
+    if(movie_info):
+        if 'votes' in movie_info and 'rating' in movie_info:
+            result['ratings'] = {'trakt': {'votes': int(movie_info['votes']), 'rating': float(movie_info['rating'])}}
+        elif 'rating' in movie_info:
+            result['ratings'] = {'trakt': {'rating': float(movie_info['rating'])}}
+    return result
+
+
 def get_trakt_ratinginfo(uniqueids):
     imdb_id = get_imdb_id(uniqueids)
     result = {}
