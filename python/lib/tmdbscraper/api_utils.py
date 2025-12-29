@@ -60,12 +60,42 @@ def set_dns_settings(settings):
     if settings:
         DNS_SETTINGS.update(settings)
 
+import time
+
+def ensure_daemon_started():
+    """Ensure the daemon process is running."""
+    if not xbmc: return False
+    
+    # Check if port is already set
+    if xbmcgui.Window(10000).getProperty('TMDB_OPTIMIZATION_SERVICE_PORT'):
+        return True
+        
+    xbmc.log('[TMDB Scraper] Daemon not running, starting...', xbmc.LOGINFO)
+    # Start daemon script
+    addon_id = 'metadata.tmdb.cn.optimization'
+    script_path = f'special://home/addons/{addon_id}/python/daemon.py'
+    xbmc.executebuiltin(f'RunScript({script_path})')
+    
+    # Wait for port to be available (max 5 seconds)
+    for _ in range(50):
+        if xbmcgui.Window(10000).getProperty('TMDB_OPTIMIZATION_SERVICE_PORT'):
+            xbmc.log('[TMDB Scraper] Daemon started successfully', xbmc.LOGINFO)
+            return True
+        time.sleep(0.1)
+        
+    xbmc.log('[TMDB Scraper] Failed to start daemon', xbmc.LOGERROR)
+    return False
+
 def load_info_from_service(url, params=None, headers=None, batch_payload=None, dns_settings=None):
     """
     Send request to the background service daemon via TCP socket.
     Supports single request (url, params) or batch request (batch_payload).
     """
     try:
+        # Ensure daemon is running
+        if not ensure_daemon_started():
+             return {'error': 'Failed to start service daemon'}
+
         # Get port dynamically from Window Property
         service_port = 56789 # Default fallback
         if xbmcgui:
@@ -77,8 +107,21 @@ def load_info_from_service(url, params=None, headers=None, batch_payload=None, d
         
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.settimeout(35) # Slightly longer than service timeout
-        sock.connect((SERVICE_HOST, service_port))
-        
+        try:
+            sock.connect((SERVICE_HOST, service_port))
+        except ConnectionRefusedError:
+            # Retry once if connection refused (maybe daemon just died or restarting)
+            xbmc.log('[TMDB Scraper] Connection refused, retrying daemon start...', xbmc.LOGWARNING)
+            xbmcgui.Window(10000).clearProperty('TMDB_OPTIMIZATION_SERVICE_PORT')
+            if ensure_daemon_started():
+                 port_str = xbmcgui.Window(10000).getProperty('TMDB_OPTIMIZATION_SERVICE_PORT')
+                 service_port = int(port_str)
+                 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                 sock.settimeout(35)
+                 sock.connect((SERVICE_HOST, service_port))
+            else:
+                 raise
+
         # Construct Protocol V2 Payload
         if batch_payload:
             requests_list = batch_payload

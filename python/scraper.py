@@ -32,7 +32,7 @@ def get_tmdb_scraper(settings):
 def get_dns_settings(settings):
     dns_map = {}
     settings_map = {
-        'dns_tmdb_api': 'api.themoviedb.org',
+        'dns_tmdb_api': 'api.tmdb.org',
         'dns_fanart_tv': 'webservice.fanart.tv',
         'dns_imdb_www': 'www.imdb.com',
         'dns_trakt_tv': 'trakt.tv'
@@ -134,14 +134,14 @@ def get_details(input_uniqueids, handle, settings, fail_silently=False):
         batch_requests.extend(tmdb_scraper.get_movie_requests(tmdb_id))
         if is_fanarttv_configured(settings):
              batch_requests.extend(fanarttv.get_movie_requests(input_uniqueids, 
-                settings.getSettingString('fanarttv_clientkey'), None))
+                settings.getSettingString('fanarttv_clientkey'), None, settings=settings))
 
     if settings.getSettingString('RatingS') == 'IMDb' or settings.getSettingBool('imdbanyway'):
         # xbmc.log("Adding IMDb rating request to batch", xbmc.LOGINFO)
-        batch_requests.extend(imdbratings.get_movie_requests(input_uniqueids))
+        batch_requests.extend(imdbratings.get_movie_requests(input_uniqueids, settings=settings))
 
     if settings.getSettingString('RatingS') == 'Trakt' or settings.getSettingBool('traktanyway'):
-        batch_requests.extend(traktratings.get_movie_requests(input_uniqueids))
+        batch_requests.extend(traktratings.get_movie_requests(input_uniqueids, settings=settings))
 
     if not batch_requests:
         return False
@@ -199,7 +199,7 @@ def get_details(input_uniqueids, handle, settings, fail_silently=False):
             if is_fanarttv_configured(settings):
                 fanart_reqs = fanarttv.get_movie_requests(input_uniqueids, 
                     settings.getSettingString('fanarttv_clientkey'),
-                    collection_id)
+                    collection_id, settings=settings)
                 # Only add collection requests
                 batch_secondary.extend([r for r in fanart_reqs if r['type'] == 'fanart_collection'])
 
@@ -215,11 +215,11 @@ def get_details(input_uniqueids, handle, settings, fail_silently=False):
             # Check IMDb
             if settings.getSettingString('RatingS') == 'IMDb' or settings.getSettingBool('imdbanyway'):
                 # We know we didn't request it before because we didn't have the ID
-                batch_secondary.extend(imdbratings.get_movie_requests(input_uniqueids))
+                batch_secondary.extend(imdbratings.get_movie_requests(input_uniqueids, settings=settings))
 
             # Check Trakt
             if settings.getSettingString('RatingS') == 'Trakt' or settings.getSettingBool('traktanyway'):
-                batch_secondary.extend(traktratings.get_movie_requests(input_uniqueids))
+                batch_secondary.extend(traktratings.get_movie_requests(input_uniqueids, settings=settings))
         
         # Execute Secondary Batch
         if batch_secondary:
@@ -262,7 +262,7 @@ def get_details(input_uniqueids, handle, settings, fail_silently=False):
         details = combine_scraped_details_info_and_ratings(details, trakt_info)
         
     # Fanart
-    fanart_info = fanarttv.parse_movie_response(responses_by_type, settings.getSettingString('language'))
+    fanart_info = fanarttv.parse_movie_response(responses_by_type, settings.getSettingString('language'), settings=settings)
     if fanart_info:
         details = combine_scraped_details_available_artwork(details,
             fanart_info,
@@ -345,7 +345,6 @@ def run():
         # Extract and set DNS settings globally for api_utils
         dns_settings = get_dns_settings(settings)
         api_utils.set_dns_settings(dns_settings)
-        
         action = params["action"]
         if action == 'find' and 'title' in params:
             search_for_movie(params["title"], params.get("year"), params['handle'], settings)

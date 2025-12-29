@@ -20,6 +20,7 @@
 
 from __future__ import absolute_import, unicode_literals
 
+import xbmcaddon
 from . import api_utils
 from . import get_imdb_id
 try:
@@ -37,16 +38,32 @@ HEADERS = (
     ('Content-Type', 'application/json'),
 )
 
-MOVIE_URL = 'https://api.trakt.tv/movies/{}'
+def get_trakt_url(settings=None):
+    try:
+        if settings:
+            base = settings.getSettingString('trakt_base_url')
+        else:
+            addon = xbmcaddon.Addon(id='metadata.tmdb.cn.optimization')
+            base = addon.getSetting('trakt_base_url')
+        if not base:
+            base = 'api.trakt.tv'
+        # If the user input doesn't start with api. and the original was api., 
+        # we might want to be careful, but we follow instructions.
+        # Original: https://api.trakt.tv/movies/{}
+        # If user inputs 'trakt.tv', result: https://trakt.tv/movies/{}
+        # If user inputs 'api.trakt.tv', result: https://api.trakt.tv/movies/{}
+        return 'https://' + base + '/movies/{}'
+    except:
+        return 'https://api.trakt.tv/movies/{}'
 
 
-def get_movie_requests(uniqueids):
+def get_movie_requests(uniqueids, settings=None):
     imdb_id = get_imdb_id(uniqueids)
     if not imdb_id:
         return []
     
     return [{
-        'url': MOVIE_URL.format(imdb_id),
+        'url': get_trakt_url(settings).format(imdb_id),
         'params': {'extended': 'full'},
         'headers': dict(HEADERS),
         'type': 'trakt_rating',
@@ -65,10 +82,10 @@ def parse_movie_response(responses):
     return result
 
 
-def get_trakt_ratinginfo(uniqueids):
+def get_trakt_ratinginfo(uniqueids, settings=None):
     imdb_id = get_imdb_id(uniqueids)
     result = {}
-    url = MOVIE_URL.format(imdb_id)
+    url = get_trakt_url(settings).format(imdb_id)
     params = {'extended': 'full'}
     api_utils.set_headers(dict(HEADERS))
     movie_info = api_utils.load_info(url, params=params, default={})

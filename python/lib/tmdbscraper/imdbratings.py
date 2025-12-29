@@ -20,10 +20,23 @@
 
 import json
 import re
+import xbmcaddon
 from . import api_utils
 from . import get_imdb_id
 
-IMDB_RATINGS_URL = 'https://www.imdb.com/title/{}/'
+def get_imdb_url(settings=None):
+    try:
+        if settings:
+            base = settings.getSettingString('imdb_base_url')
+        else:
+            addon = xbmcaddon.Addon(id='metadata.tmdb.cn.optimization')
+            base = addon.getSetting('imdb_base_url')
+        if not base:
+            base = 'www.imdb.com'
+        return 'https://' + base + '/title/{}/'
+    except:
+        return 'https://www.imdb.com/title/{}/'
+
 IMDB_LDJSON_REGEX = re.compile(r'<script type="application/ld\+json">(.*?)</script>', re.DOTALL)
 IMDB_TOP250_REGEX = re.compile(r'Top rated movie #(\d+)')
 
@@ -37,13 +50,13 @@ HEADERS = (
     ('Accept', 'application/json'),
 )
 
-def get_movie_requests(uniqueids):
+def get_movie_requests(uniqueids, settings=None):
     imdb_id = get_imdb_id(uniqueids)
     if not imdb_id:
         return []
     
     return [{
-        'url': IMDB_RATINGS_URL.format(imdb_id),
+        'url': get_imdb_url(settings).format(imdb_id),
         'headers': dict(HEADERS),
         'type': 'imdb_rating',
         'id': imdb_id,
@@ -59,16 +72,16 @@ def parse_movie_response(responses):
     votes, rating, top250 = _parse_imdb_result(response)
     return _assemble_imdb_result(votes, rating, top250)
 
-def get_details(uniqueids):
+def get_details(uniqueids, settings=None):
     imdb_id = get_imdb_id(uniqueids)
     if not imdb_id:
         return {}
-    votes, rating, top250 = _get_ratinginfo(imdb_id)
+    votes, rating, top250 = _get_ratinginfo(imdb_id, settings)
     return _assemble_imdb_result(votes, rating, top250)
 
-def _get_ratinginfo(imdb_id):
+def _get_ratinginfo(imdb_id, settings=None):
     api_utils.set_headers(dict(HEADERS))
-    response = api_utils.load_info(IMDB_RATINGS_URL.format(imdb_id), default = '', resp_type='text')
+    response = api_utils.load_info(get_imdb_url(settings).format(imdb_id), default = '', resp_type='text')
     return _parse_imdb_result(response)
 
 def _assemble_imdb_result(votes, rating, top250):

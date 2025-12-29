@@ -1,11 +1,24 @@
 from . import api_utils
+import xbmcaddon
 try:
     from urllib import quote
 except ImportError: # py2 / py3
     from urllib.parse import quote
 
 API_KEY = '384afe262ee0962545a752ff340e3ce4'
-API_URL = 'https://webservice.fanart.tv/v3/movies/{}'
+
+def get_api_url(settings=None):
+    try:
+        if settings:
+            base = settings.getSettingString('fanart_base_url')
+        else:
+            addon = xbmcaddon.Addon(id='metadata.tmdb.cn.optimization')
+            base = addon.getSetting('fanart_base_url')
+        if not base:
+            base = 'webservice.fanart.tv'
+        return 'https://' + base + '/v3/movies/{}'
+    except:
+        return 'https://webservice.fanart.tv/v3/movies/{}'
 
 ARTMAP = {
     'movielogo': 'clearlogo',
@@ -25,7 +38,7 @@ HEADERS = (
 )
 
 
-def get_movie_requests(uniqueids, clientkey, set_tmdbid):
+def get_movie_requests(uniqueids, clientkey, set_tmdbid, settings=None):
     media_id = _get_mediaid(uniqueids)
     if not media_id:
         return []
@@ -34,9 +47,10 @@ def get_movie_requests(uniqueids, clientkey, set_tmdbid):
     if clientkey:
         headers['client-key'] = clientkey
     
+    api_url = get_api_url(settings)
     reqs = []
     reqs.append({
-        'url': API_URL.format(media_id),
+        'url': api_url.format(media_id),
         'headers': headers,
         'type': 'fanart_movie',
         'id': media_id
@@ -44,7 +58,7 @@ def get_movie_requests(uniqueids, clientkey, set_tmdbid):
     
     if set_tmdbid:
         reqs.append({
-            'url': API_URL.format(set_tmdbid),
+            'url': api_url.format(set_tmdbid),
             'headers': headers,
             'type': 'fanart_collection',
             'id': set_tmdbid
@@ -53,7 +67,7 @@ def get_movie_requests(uniqueids, clientkey, set_tmdbid):
     return reqs
 
 
-def parse_movie_response(responses, language):
+def parse_movie_response(responses, language, settings=None):
     movie_data = responses.get('fanart_movie')
     movieset_data = responses.get('fanart_collection')
     
@@ -63,9 +77,9 @@ def parse_movie_response(responses, language):
     movie_art = {}
     movieset_art = {}
     if movie_data:
-        movie_art = _parse_data(movie_data, language)
+        movie_art = _parse_data(movie_data, language, settings=settings)
     if movieset_data:
-        movieset_art = _parse_data(movieset_data, language)
+        movieset_art = _parse_data(movieset_data, language, settings=settings)
         movieset_art = {'set.' + key: value for key, value in movieset_art.items()}
 
     available_art = movie_art
@@ -74,13 +88,13 @@ def parse_movie_response(responses, language):
     return {'available_art': available_art}
 
 
-def get_details(uniqueids, clientkey, language, set_tmdbid):
+def get_details(uniqueids, clientkey, language, set_tmdbid, settings=None):
     media_id = _get_mediaid(uniqueids)
     if not media_id:
         return {}
 
-    movie_data = _get_data(media_id, clientkey)
-    movieset_data = _get_data(set_tmdbid, clientkey) if set_tmdbid else None
+    movie_data = _get_data(media_id, clientkey, settings)
+    movieset_data = _get_data(set_tmdbid, clientkey, settings) if set_tmdbid else None
     if not movie_data and not movieset_data:
         return {}
 
@@ -102,15 +116,26 @@ def _get_mediaid(uniqueids):
         if source in uniqueids:
             return uniqueids[source]
 
-def _get_data(media_id, clientkey):
+def _get_data(media_id, clientkey, settings=None):
     headers = dict(HEADERS)
     if clientkey:
         headers['client-key'] = clientkey
     api_utils.set_headers(headers)
-    fanarttv_url = API_URL.format(media_id)
+    fanarttv_url = get_api_url(settings).format(media_id)
     return api_utils.load_info(fanarttv_url, default={})
 
-def _parse_data(data, language, language_fallback='en'):
+def _parse_data(data, language, language_fallback='en', settings=None):
+    try:
+        if settings:
+            proxy = settings.getSettingString('image_proxy_prefix')
+        else:
+            addon = xbmcaddon.Addon(id='metadata.tmdb.cn.optimization')
+            proxy = addon.getSetting('image_proxy_prefix')
+        if not proxy:
+            proxy = 'https://wsrv.nl/?url='
+    except:
+        proxy = 'https://wsrv.nl/?url='
+
     result = {}
     for arttype, artlist in data.items():
         if arttype not in ARTMAP:
@@ -126,8 +151,10 @@ def _parse_data(data, language, language_fallback='en'):
             if artlist and generaltype not in result:
                 result[generaltype] = []
 
-            url = quote(image['url'], safe="%/:=&?~#+!$,;'@()*[]")
-            resultimage = {'url': url, 'preview': url.replace('.fanart.tv/fanart/', '.fanart.tv/preview/'), 'lang': image_lang}
+            raw_url = quote(image['url'], safe="%/:=&?~#+!$,;'@()*[]")
+            preview_raw = raw_url.replace('.fanart.tv/fanart/', '.fanart.tv/preview/')
+            
+            resultimage = {'url': proxy + raw_url, 'preview': proxy + preview_raw, 'lang': image_lang}
             result[generaltype].append(resultimage)
 
     return result

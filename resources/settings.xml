@@ -361,6 +361,60 @@
 				</setting>
 			</group>
 		</category>
+		<category id="proxy_custom" label="32005">
+			<group id="1">
+				<setting id="tmdb_api_base_url" type="string" label="32006" help="">
+					<level>0</level>
+					<default>api.tmdb.org</default>
+					<constraints>
+						<allowempty>true</allowempty>
+					</constraints>
+					<control type="edit" format="string">
+						<heading>32006</heading>
+					</control>
+				</setting>
+				<setting id="image_proxy_prefix" type="string" label="32007" help="">
+					<level>0</level>
+					<default>https://wsrv.nl/?url=</default>
+					<constraints>
+						<allowempty>true</allowempty>
+					</constraints>
+					<control type="edit" format="string">
+						<heading>32007</heading>
+					</control>
+				</setting>
+				<setting id="fanart_base_url" type="string" label="32008" help="">
+					<level>0</level>
+					<default>webservice.fanart.tv</default>
+					<constraints>
+						<allowempty>true</allowempty>
+					</constraints>
+					<control type="edit" format="string">
+						<heading>32008</heading>
+					</control>
+				</setting>
+				<setting id="imdb_base_url" type="string" label="32009" help="">
+					<level>0</level>
+					<default>www.imdb.com</default>
+					<constraints>
+						<allowempty>true</allowempty>
+					</constraints>
+					<control type="edit" format="string">
+						<heading>32009</heading>
+					</control>
+				</setting>
+				<setting id="trakt_base_url" type="string" label="32010" help="">
+					<level>0</level>
+					<default>api.trakt.tv</default>
+					<constraints>
+						<allowempty>true</allowempty>
+					</constraints>
+					<control type="edit" format="string">
+						<heading>32010</heading>
+					</control>
+				</setting>
+			</group>
+		</category>
 		<category id="dns_custom" label="32000">
 			<group id="1">
 				<setting id="dns_tmdb_api" type="string" label="32001" help="">

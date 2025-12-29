@@ -114,8 +114,8 @@ msgid "DNS Resolution"
 msgstr "DNS解析"
 
 msgctxt "#32001"
-msgid "api.themoviedb.org"
-msgstr "api.themoviedb.org"
+msgid "api.tmdb.org"
+msgstr "api.tmdb.org"
 
 msgctxt "#32002"
 msgid "webservice.fanart.tv"
@@ -128,4 +128,28 @@ msgstr "www.imdb.com"
 msgctxt "#32004"
 msgid "trakt.tv"
 msgstr "trakt.tv"
+
+msgctxt "#32005"
+msgid "Proxy"
+msgstr "代理"
+
+msgctxt "#32006"
+msgid "TMDB API Base URL"
+msgstr "TMDB API基础URL"
+
+msgctxt "#32007"
+msgid "Image Proxy"
+msgstr "图片代理"
+
+msgctxt "#32008"
+msgid "Fanart Base URL"
+msgstr "fanart基础URL"
+
+msgctxt "#32009"
+msgid "IMDb Base URL"
+msgstr "imdb基础url"
+
+msgctxt "#32010"
+msgid "Trakt TV Base URL"
+msgstr "trakt tv基础url"
 

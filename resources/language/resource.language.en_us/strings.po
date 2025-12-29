@@ -129,3 +129,27 @@ msgctxt "#32004"
 msgid "trakt.tv"
 msgstr "trakt.tv"
 
+msgctxt "#32005"
+msgid "Proxy"
+msgstr "Proxy"
+
+msgctxt "#32006"
+msgid "TMDB API Base URL"
+msgstr "TMDB API Base URL"
+
+msgctxt "#32007"
+msgid "Image Proxy"
+msgstr "Image Proxy"
+
+msgctxt "#32008"
+msgid "Fanart Base URL"
+msgstr "Fanart Base URL"
+
+msgctxt "#32009"
+msgid "IMDb Base URL"
+msgstr "IMDb Base URL"
+
+msgctxt "#32010"
+msgid "Trakt TV Base URL"
+msgstr "Trakt TV Base URL"
+

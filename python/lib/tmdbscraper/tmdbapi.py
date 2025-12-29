@@ -19,6 +19,7 @@
 """Functions to interact with TMDb API."""
 
 import unicodedata
+import xbmcaddon
 from . import api_utils
 try:
     import xbmc
@@ -38,18 +39,25 @@ HEADERS = (
 )
 
 TMDB_PARAMS = {'api_key': 'f090bb54758cabf231fb605d3e3e0468'}
-BASE_URL = 'https://api.themoviedb.org/3/{}'
-SEARCH_URL = BASE_URL.format('search/movie')
-FIND_URL = BASE_URL.format('find/{}')
-MOVIE_URL = BASE_URL.format('movie/{}')
-COLLECTION_URL = BASE_URL.format('collection/{}')
-CONFIG_URL = BASE_URL.format('configuration')
+
+def get_base_url(settings=None):
+    try:
+        if settings:
+            base = settings.getSettingString('tmdb_api_base_url')
+        else:
+            addon = xbmcaddon.Addon(id='metadata.tmdb.cn.optimization')
+            base = addon.getSetting('tmdb_api_base_url')
+        if not base:
+            base = 'api.tmdb.org'
+        return 'https://' + base + '/3/{}'
+    except:
+        return 'https://api.tmdb.org/3/{}'
 
 def log(message):
     if xbmc:
         xbmc.log(message, xbmc.LOGDEBUG)
 
-def search_movie(query, year=None, language=None, page=None):
+def search_movie(query, year=None, language=None, page=None, settings=None):
     # type: (Text) -> List[InfoType]
     """
     Search for a movie
@@ -58,11 +66,12 @@ def search_movie(query, year=None, language=None, page=None):
     :param year: the year to search (optional)
     :param language: the language filter for TMDb (optional)
     :param page: the results page to return (optional)
+    :param settings: addon settings object (optional)
     :return: a list with found movies
     """
     query = unicodedata.normalize('NFC', query)
     log('using title of %s to find movie' % query)
-    theurl = SEARCH_URL
+    theurl = get_base_url(settings).format('search/movie')
     params = _set_params(None, language)
     params['query'] = query
     if page is not None:
@@ -73,17 +82,18 @@ def search_movie(query, year=None, language=None, page=None):
     return api_utils.load_info(theurl, params=params)
 
 
-def find_movie_by_external_id(external_id, language=None):
+def find_movie_by_external_id(external_id, language=None, settings=None):
     # type: (Text) -> List[InfoType]
     """
     Find movie based on external ID
 
     :param mid: external ID
     :param language: the language filter for TMDb (optional)
+    :param settings: addon settings object (optional)
     :return: the movie or error
     """
     log('using external id of %s to find movie' % external_id)
-    theurl = FIND_URL.format(external_id)
+    theurl = get_base_url(settings).format('find/{}').format(external_id)
     params = _set_params(None, language)
     params['external_source'] = 'imdb_id'
     api_utils.set_headers(dict(HEADERS))
@@ -91,7 +101,7 @@ def find_movie_by_external_id(external_id, language=None):
 
 
 
-def get_movie(mid, language=None, append_to_response=None):
+def get_movie(mid, language=None, append_to_response=None, settings=None):
     # type: (Text) -> List[InfoType]
     """
     Get movie details
@@ -99,21 +109,22 @@ def get_movie(mid, language=None, append_to_response=None):
     :param mid: TMDb movie ID
     :param language: the language filter for TMDb (optional)
     :append_to_response: the additional data to get from TMDb (optional)
+    :param settings: addon settings object (optional)
     :return: the movie or error
     """
     log('using movie id of %s to get movie details' % mid)
-    theurl = MOVIE_URL.format(mid)
+    theurl = get_base_url(settings).format('movie/{}').format(mid)
     api_utils.set_headers(dict(HEADERS))
     return api_utils.load_info(theurl, params=_set_params(append_to_response, language))
 
-def get_movie_request(mid, language=None, append_to_response=None):
+def get_movie_request(mid, language=None, append_to_response=None, settings=None):
     log('using movie id of %s to get movie details' % mid)
-    theurl = MOVIE_URL.format(mid)
+    theurl = get_base_url(settings).format('movie/{}').format(mid)
     return {'url': theurl, 'params': _set_params(append_to_response, language), 'headers': dict(HEADERS), 'type': 'tmdb'}
 
 
 
-def get_collection(collection_id, language=None, append_to_response=None):
+def get_collection(collection_id, language=None, append_to_response=None, settings=None):
     # type: (Text) -> List[InfoType]
     """
     Get movie collection information
@@ -121,24 +132,26 @@ def get_collection(collection_id, language=None, append_to_response=None):
     :param collection_id: TMDb collection ID
     :param language: the language filter for TMDb (optional)
     :append_to_response: the additional data to get from TMDb (optional)
+    :param settings: addon settings object (optional)
     :return: the movie or error
     """
     log('using collection id of %s to get collection details' % collection_id)
-    theurl = COLLECTION_URL.format(collection_id)
+    theurl = get_base_url(settings).format('collection/{}').format(collection_id)
     api_utils.set_headers(dict(HEADERS))
     return api_utils.load_info(theurl, params=_set_params(append_to_response, language))
 
 
-def get_configuration():
+def get_configuration(settings=None):
     # type: (Text) -> List[InfoType]
     """
     Get configuration information
 
+    :param settings: addon settings object (optional)
     :return: configuration details or error
     """
     log('getting configuration details')
     api_utils.set_headers(dict(HEADERS))
-    return api_utils.load_info(CONFIG_URL, params=TMDB_PARAMS.copy())
+    return api_utils.load_info(get_base_url(settings).format('configuration'), params=TMDB_PARAMS.copy())
 
 
 def _set_params(append_to_response, language):

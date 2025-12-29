@@ -19,19 +19,41 @@ DNS_LOCK = threading.Lock()
 # 用户自定义IP映射 (从插件设置加载)
 CUSTOM_IP_MAP = {}
 HOSTS_MAP = {}
+TARGET_DOMAINS = ['themoviedb.org', 'tmdb.org', 'fanart.tv', 'imdb.com', 'trakt.tv']
 
-ADDON = xbmcaddon.Addon()
+ADDON = xbmcaddon.Addon(id='metadata.tmdb.cn.optimization')
 
 def load_custom_ips():
-    global CUSTOM_IP_MAP
+    global CUSTOM_IP_MAP, TARGET_DOMAINS
     CUSTOM_IP_MAP = {}
+    
+    # Helper to extract domain from URL if needed
+    def get_domain(url):
+        if '://' in url:
+            return urlparse(url).netloc
+        return url.split('/')[0]
+
+    tmdb_domain = ADDON.getSetting('tmdb_api_base_url') or 'api.tmdb.org'
+    fanart_domain = ADDON.getSetting('fanart_base_url') or 'webservice.fanart.tv'
+    trakt_domain = ADDON.getSetting('trakt_base_url') or 'trakt.tv'
+    imdb_domain = ADDON.getSetting('imdb_base_url') or 'www.imdb.com'
+
+    tmdb_host = get_domain(tmdb_domain)
+    fanart_host = get_domain(fanart_domain)
+    trakt_host = get_domain(trakt_domain)
+    imdb_host = get_domain(imdb_domain)
+
+    # Update TARGET_DOMAINS
+    for d in [tmdb_host, fanart_host, trakt_host, imdb_host]:
+        if d and d not in TARGET_DOMAINS:
+            TARGET_DOMAINS.append(d)
     
     # Mapping setting ID to domain
     settings_map = {
-        'dns_tmdb_api': 'api.themoviedb.org',
-        'dns_fanart_tv': 'webservice.fanart.tv',
-        'dns_imdb_www': 'www.imdb.com',
-        'dns_trakt_tv': 'trakt.tv'
+        'dns_tmdb_api': tmdb_host,
+        'dns_fanart_tv': fanart_host,
+        'dns_imdb_www': imdb_host,
+        'dns_trakt_tv': trakt_host
     }
     
     for setting_id, domain in settings_map.items():
@@ -74,7 +96,7 @@ def load_hosts():
 
     # 2. Addon Userdata Hosts
     try:
-        profile_dir = xbmc.translatePath(xbmcaddon.Addon().getAddonInfo('profile'))
+        profile_dir = xbmc.translatePath(ADDON.getAddonInfo('profile'))
         if not os.path.exists(profile_dir):
             os.makedirs(profile_dir)
         user_hosts = os.path.join(profile_dir, 'hosts')
@@ -173,7 +195,7 @@ def patched_getaddrinfo(host, port, family=0, type=0, proto=0, flags=0):
         return ORIGINAL_GETADDRINFO(host, port, family, type, proto, flags)
         
     # Intercept target domains
-    if any(d in host for d in ['themoviedb.org', 'tmdb.org', 'fanart.tv', 'imdb.com', 'trakt.tv']):
+    if any(d in host for d in TARGET_DOMAINS):
         ip = doh_lookup(host)
         if ip:
             # Return IPv4 TCP address
@@ -338,6 +360,7 @@ def handle_client(conn, addr):
         conn.close()
 
 def start_server(monitor):
+    global THREAD_POOL
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     
@@ -366,20 +389,26 @@ def start_server(monitor):
             
             xbmc.log(f'[TMDB Service] Daemon started on {HOST}:{port}', xbmc.LOGINFO)
             
+            last_activity = time.time()
+            IDLE_TIMEOUT = 20 # seconds
+
             while not monitor.abortRequested():
                 # Use select to wait for connections or timeout to check abortRequested
                 readable, _, _ = select.select([server], [], [], 1.0)
                 
                 if server in readable:
+                    last_activity = time.time()
                     conn, addr = server.accept()
                     conn.setblocking(True) # Ensure blocking mode for the thread handler
                     # Handle in a thread to not block other requests
                     t = threading.Thread(target=handle_client, args=(conn, addr))
                     t.daemon = True
                     t.start()
+                elif time.time() - last_activity > IDLE_TIMEOUT:
+                    xbmc.log('[TMDB Service] No activity for 20s, shutting down daemon', xbmc.LOGINFO)
+                    break
                 
                 # Check pool cleanup
-                global THREAD_POOL
                 with POOL_LOCK:
                     if THREAD_POOL and (time.time() - LAST_POOL_USE > POOL_TIMEOUT):
                         xbmc.log('[TMDB Service] Shutting down idle ThreadPoolExecutor', xbmc.LOGINFO)
@@ -392,6 +421,14 @@ def start_server(monitor):
         server.close()
         # Clean up property
         xbmcgui.Window(10000).clearProperty('TMDB_OPTIMIZATION_SERVICE_PORT')
+        
+        # Ensure ThreadPool is shut down
+        with POOL_LOCK:
+            if THREAD_POOL:
+                xbmc.log('[TMDB Service] Shutting down ThreadPoolExecutor on exit', xbmc.LOGINFO)
+                THREAD_POOL.shutdown(wait=False)
+                THREAD_POOL = None
+
         xbmc.log('[TMDB Service] Daemon stopped', xbmc.LOGINFO)
 
 class SettingsMonitor(xbmc.Monitor):

@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta
 from . import tmdbapi
+import xbmcaddon
 
 class TMDBMovieScraper(object):
     def __init__(self, url_settings, language, certification_country, search_language=""):
@@ -18,6 +19,19 @@ class TMDBMovieScraper(object):
             self._urls = _load_base_urls(self.url_settings)
         return self._urls
 
+    def _get_proxy(self):
+        try:
+            if self.url_settings:
+                proxy = self.url_settings.getSettingString('image_proxy_prefix')
+            else:
+                addon = xbmcaddon.Addon(id='metadata.tmdb.cn.optimization')
+                proxy = addon.getSetting('image_proxy_prefix')
+            if not proxy:
+                proxy = 'https://wsrv.nl/?url='
+            return proxy
+        except:
+            return 'https://wsrv.nl/?url='
+
     def search(self, title, year=None):
 
         def is_best(item):
@@ -32,12 +46,12 @@ class TMDBMovieScraper(object):
                     return result
                 result = [result]
             else:
-                result = tmdbapi.find_movie_by_external_id(search_media_id['id'], language=self.search_language)
+                result = tmdbapi.find_movie_by_external_id(search_media_id['id'], language=self.search_language, settings=self.url_settings)
                 if 'error' in result:
                     return result
                 result = result.get('movie_results')
         else:
-            response = tmdbapi.search_movie(query=title, year=year, language=self.search_language)
+            response = tmdbapi.search_movie(query=title, year=year, language=self.search_language, settings=self.url_settings)
             if 'error' in response:
                 return response
             result = response['results']
@@ -45,7 +59,7 @@ class TMDBMovieScraper(object):
             if response['total_pages'] > 1:
                 bests = [item for item in result if is_best(item) and item.get('popularity',0) > 5]
                 if not bests:
-                    response = tmdbapi.search_movie(query=title, year=year, language=self.language, page=2)
+                    response = tmdbapi.search_movie(query=title, year=year, language=self.language, page=2, settings=self.url_settings)
                     if not 'error' in response:
                         result += response['results']
         urls = self.urls
@@ -55,11 +69,13 @@ class TMDBMovieScraper(object):
             bests_first = sorted([item for item in result if is_best(item)], key=lambda k: k.get('popularity',0), reverse=True)
             result = bests_first + [item for item in result if item not in bests_first]
 
+        proxy = self._get_proxy()
+
         for item in result:
             if item.get('poster_path'):
-                item['poster_path'] = urls['preview'] + item['poster_path']
+                item['poster_path'] = proxy + urls['preview'] + item['poster_path']
             if item.get('backdrop_path'):
-                item['backdrop_path'] = urls['preview'] + item['backdrop_path']
+                item['backdrop_path'] = proxy + urls['preview'] + item['backdrop_path']
         return result
 
     def get_movie_requests(self, media_id):
@@ -67,15 +83,18 @@ class TMDBMovieScraper(object):
         details_lang = 'trailers,images,releases,casts,keywords'
         details_fallback = 'trailers,images'
         
+        base_url = tmdbapi.get_base_url(self.url_settings)
+        movie_url = base_url.format('movie/{}')
+
         req_movie = {
-            'url': tmdbapi.MOVIE_URL.format(media_id),
+            'url': movie_url.format(media_id),
             'params': tmdbapi._set_params(details_lang, self.language),
             'headers': dict(tmdbapi.HEADERS),
             'type': 'tmdb_movie',
             'id': media_id
         }
         req_fallback = {
-            'url': tmdbapi.MOVIE_URL.format(media_id),
+            'url': movie_url.format(media_id),
             'params': tmdbapi._set_params(details_fallback, None),
             'headers': dict(tmdbapi.HEADERS),
             'type': 'tmdb_movie_fallback',
@@ -86,15 +105,19 @@ class TMDBMovieScraper(object):
     def get_collection_requests(self, collection_id):
         from . import tmdbapi
         details_col = 'images'
+        
+        base_url = tmdbapi.get_base_url()
+        collection_url = base_url.format('collection/{}')
+
         req_col = {
-            'url': tmdbapi.COLLECTION_URL.format(collection_id),
+            'url': collection_url.format(collection_id),
             'params': tmdbapi._set_params(details_col, self.language),
             'headers': dict(tmdbapi.HEADERS),
             'type': 'tmdb_collection',
             'id': collection_id
         }
         req_col_fallback = {
-            'url': tmdbapi.COLLECTION_URL.format(collection_id),
+            'url': collection_url.format(collection_id),
             'params': tmdbapi._set_params(details_col, None),
             'headers': dict(tmdbapi.HEADERS),
             'type': 'tmdb_collection_fallback',
@@ -284,7 +307,7 @@ class TMDBMovieScraper(object):
             }
             for actor in movie['casts'].get('cast', [])
         ]
-        available_art = _parse_artwork(movie, collection, self.urls, self.language)
+        available_art = _parse_artwork(movie, collection, self.urls, self.language, self._get_proxy())
 
         _info = {'set_tmdbid': movie['belongs_to_collection'].get('id')
             if movie['belongs_to_collection'] else None}
@@ -314,7 +337,7 @@ def _get_moviecollection(collection_id, language=None):
     details = 'images'
     return tmdbapi.get_collection(collection_id, language=language, append_to_response=details)
 
-def _parse_artwork(movie, collection, urlbases, language):
+def _parse_artwork(movie, collection, urlbases, language, proxy_prefix=''):
     if language:
         # Image languages don't have regional variants
         language = language.split('-')[0]
@@ -324,39 +347,39 @@ def _parse_artwork(movie, collection, urlbases, language):
     fanart = []
 
     if 'images' in movie:
-        posters = _build_image_list_with_fallback(movie['images']['posters'], urlbases, language)
-        landscape = _build_image_list_with_fallback(movie['images']['backdrops'], urlbases, language)
-        logos = _build_image_list_with_fallback(movie['images']['logos'], urlbases, language)
-        fanart = _build_fanart_list(movie['images']['backdrops'], urlbases)
+        posters = _build_image_list_with_fallback(movie['images']['posters'], urlbases, language, proxy_prefix=proxy_prefix)
+        landscape = _build_image_list_with_fallback(movie['images']['backdrops'], urlbases, language, proxy_prefix=proxy_prefix)
+        logos = _build_image_list_with_fallback(movie['images']['logos'], urlbases, language, proxy_prefix=proxy_prefix)
+        fanart = _build_fanart_list(movie['images']['backdrops'], urlbases, proxy_prefix=proxy_prefix)
 
     setposters = []
     setlandscape = []
     setfanart = []
     if collection and 'images' in collection:
-        setposters = _build_image_list_with_fallback(collection['images']['posters'], urlbases, language)
-        setlandscape = _build_image_list_with_fallback(collection['images']['backdrops'], urlbases, language)
-        setfanart = _build_fanart_list(collection['images']['backdrops'], urlbases)
+        setposters = _build_image_list_with_fallback(collection['images']['posters'], urlbases, language, proxy_prefix=proxy_prefix)
+        setlandscape = _build_image_list_with_fallback(collection['images']['backdrops'], urlbases, language, proxy_prefix=proxy_prefix)
+        setfanart = _build_fanart_list(collection['images']['backdrops'], urlbases, proxy_prefix=proxy_prefix)
 
     return {'poster': posters, 'landscape': landscape, 'fanart': fanart,
         'set.poster': setposters, 'set.landscape': setlandscape, 'set.fanart': setfanart, 'clearlogo': logos}
 
-def _build_image_list_with_fallback(imagelist, urlbases, language, language_fallback='en'):
-    images = _build_image_list(imagelist, urlbases, [language])
+def _build_image_list_with_fallback(imagelist, urlbases, language, language_fallback='en', proxy_prefix=''):
+    images = _build_image_list(imagelist, urlbases, [language], proxy_prefix=proxy_prefix)
 
     # Add backup images
     if language != language_fallback:
-        images.extend(_build_image_list(imagelist, urlbases, [language_fallback]))
+        images.extend(_build_image_list(imagelist, urlbases, [language_fallback], proxy_prefix=proxy_prefix))
 
     # Add any images if nothing set so far
     if not images:
-        images = _build_image_list(imagelist, urlbases)
+        images = _build_image_list(imagelist, urlbases, proxy_prefix=proxy_prefix)
 
     return images
 
-def _build_fanart_list(imagelist, urlbases):
-    return _build_image_list(imagelist, urlbases, ['xx', None])
+def _build_fanart_list(imagelist, urlbases, proxy_prefix=''):
+    return _build_image_list(imagelist, urlbases, ['xx', None], proxy_prefix=proxy_prefix)
 
-def _build_image_list(imagelist, urlbases, languages=[]):
+def _build_image_list(imagelist, urlbases, languages=[], proxy_prefix=''):
     result = []
     for img in imagelist:
         if languages and img['iso_639_1'] not in languages:
@@ -364,8 +387,8 @@ def _build_image_list(imagelist, urlbases, languages=[]):
         if img['file_path'].endswith('.svg'):
             continue
         result.append({
-            'url': urlbases['original'] + img['file_path'],
-            'preview': urlbases['preview'] + img['file_path'],
+            'url': proxy_prefix + urlbases['original'] + img['file_path'],
+            'preview': proxy_prefix + urlbases['preview'] + img['file_path'],
             'lang': img['iso_639_1']
         })
     return result
