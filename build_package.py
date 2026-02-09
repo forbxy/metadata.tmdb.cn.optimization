@@ -28,7 +28,7 @@ def zip_addon(addon_id, version):
     with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
         for root, dirs, files in os.walk(cwd):
             # Exclude directories
-            dirs[:] = [d for d in dirs if d not in ['dist', '.idea', '.vscode', '__pycache__']]
+            dirs[:] = [d for d in dirs if d not in ['.git', 'dist', '.idea', '.vscode', '__pycache__']]
             
             for file in files:
                 # Exclude specific files
