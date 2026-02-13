@@ -1,16 +1,49 @@
-## The Movie Database Python scraper for Kodi
+# TMDB CN Optimization (metadata.tmdb.cn.optimization)
 
-This is early work on a Python movie scraper for Kodi.
+Kodi 电影刮削器 (TMDB CN Optimization)，特别针对中文环境优化，包含多线程刮削与 DeepSeek 文件名解析功能。
 
-### Manual search by IMDB / TMDB ID
-When manually searching you can enter an IMDB or TMDB ID to pull up an exact movie result.
-To search by TMDB enter "tmdb/" then the ID, like "tmdb/11". To search by IMDB ID enter it directly.
+## 功能特性
 
-## Development info
+*   **多线程刮削**：显著提升大媒体库的扫描速度。
+*   **DeepSeek 集成**：利用 AI 解析复杂文件名，提高识别准确率。
+*   **中文优化**：针对中文命名习惯和 TMDB 数据进行优化。
+*   **兼容性**：保留了原版单线程刮削的所有功能。
 
-### How to run unit tests
+## 多线程刮削器使用指南 (How to)
 
-`python3 -m unittest discover -v` from the main **metadata.themoviedb.org.python** directory.
+本插件内置了一个实验性的多线程刮削工具，适合需要快速建立新库或批量更新的用户。
 
-Set env variable `TEST_E2E` to enable the single IMDB end-to-end test, `TEST_E2E=true python3 -m unittest discover -v`.
-Not for a pipeline, but may be helpful to run now and then.
+### 1. 配置
+进入 **设置 -> 插件 -> 我的插件 -> 信息提供者 -> 电影信息 -> TMDB CN Optimization**。
+点击 **设置**，进入 **多线程刮削** 标签页：
+*   **线程数**：使用默认即可，或根据机器性能调整（**注：此项仅支持插件全局设置，单个视频源内的线程数设置将被忽略**）。
+*   **DeepSeek 设置**（支持视频源级别独立配置）：
+    *   启用 DeepSeek 以获得更好的文件名解析能力。
+    *   **DeepSeek API Key 文件**：创建一个纯文本文件（例如 `deepseek_key.txt`），只需将 API Key 粘贴在里面，然后在此处选择文件路径。
+
+### 2. 设置源
+1.  在 Kodi 文件管理中编辑源内容。
+2.  选择 **TMDB CN Optimization** 作为刮削器。
+3.  点击确定保存设置。
+4.  **重要**：当弹出 "**是否刷新此目录内的所有项目？**" 询问时，请选择 **否 (No)**。
+    *   *说明：如果选“是”，Kodi 将调用刮削器的单线程版本（不支持 DeepSeek）。*
+
+### 3. 运行刮削
+1.  再次进入该源的 **更改内容** -> **设置**。
+2.  进入 **多线程刮削** 标签页。
+3.  点击 **运行多线程刮削工具**。
+4.  此时多线程刮削工具会扫描所有刮削器设置为 **TMDB CN Optimization** 的源。
+
+## 注意事项与提示
+
+1.  **单线程模式**：插件保留原来的单线程版本，按 Kodi 常用用法使用即可。
+2.  **媒体信息提取**：多线程模式目前**不支持**提取视频的媒体信息（StreamDetails 等）。
+3.  **目录设置**：
+    *   多线程模式仅支持 **包含子目录 (Recursive)** 和 **排除更新 (Exclude from scan)** 这两个目录属性。
+    *   其他复杂的目录级设置可能在多线程模式下被忽略。
+4.  **云盘/网盘警告 (尤其是 115)**：
+    *   如果多线程扫描的是 115 网盘（通过 WebDAV/CD2 等挂载），且文件结构是“一个电影一个目录”，**极易触发风控**。
+    *   建议：除非您已提前把目录结构缓存好，否则请谨慎操作。
+
+## 失败列表
+刮削结束后会展示失败的文件列表以及详细的搜索/解析记录（包括文件名 ID、NFO ID、常规搜索词、DeepSeek 搜索词），方便排查问题。
