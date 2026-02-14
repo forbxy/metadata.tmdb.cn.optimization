@@ -56,6 +56,9 @@ class SettingsProxy:
             except: return 0
         return self.base_settings.getSettingInt(key)
 
+    def setSetting(self, key, value):
+        return self.base_settings.setSetting(key, value)
+
 class KodiDatabase:
     def __init__(self, db_path):
         self.db_path = db_path
