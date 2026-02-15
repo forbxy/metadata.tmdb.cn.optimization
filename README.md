@@ -21,7 +21,7 @@ Kodi 电影刮削器 (TMDB CN Optimization)，特别针对中文环境优化，�
     *   启用 DeepSeek 以获得更好的文件名解析能力。
     *   **DeepSeek API Key 文件**：创建一个纯文本文件（例如 `deepseek_key.txt`），只需将 API Key 粘贴在里面，然后在此处选择文件路径。
 
-### 2. 设置源
+### 2. 设置视频源
 1.  在 Kodi 文件管理中编辑源内容。
 2.  选择 **TMDB CN Optimization** 作为刮削器。
 3.  点击确定保存设置。
