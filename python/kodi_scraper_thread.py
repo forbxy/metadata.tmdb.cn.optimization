@@ -991,6 +991,9 @@ class KodiScraperSimulation:
             log(f"Processing: {file_path} | Title: {title} | Year: {year} | ID: {unique_id}", xbmc.LOGINFO)
             runner = ScraperRunner(settings)
             details = None
+            ds_title, ds_year, ds_english = None, None, None
+            english_title_from_deepseek = None # For compatibility in failure logging
+
             # 1. NFO Check
             nfo_details, nfo_ids = self.scan_local_nfo(file_path, video_files_in_dir, files_map)
             if nfo_details:
@@ -1017,33 +1020,55 @@ class KodiScraperSimulation:
             # 3. Search
             if not details:
                 try:
-                    # DeepSeek Extraction
-                    english_title_from_deepseek = None
-                    if deepseek_extractor:
-                        ds_title, ds_year, ds_english = self.extract_info_via_deepseek(raw_name, deepseek_extractor)
-                        if ds_title:
-                            title = ds_title
-                        if ds_year:
-                            year = ds_year
-                        if ds_english:
-                            english_title_from_deepseek = ds_english
+                    results = []
+                    ds_title, ds_year, ds_english = None, None, None
                     
-                    search_history.append(f"搜索: {title} ({year})")
-                    results = runner.search(title, year)
-                    if not results and english_title_from_deepseek and english_title_from_deepseek != title:
-                        log(f"No results for original title. Trying DeepSeek English title: {english_title_from_deepseek}", xbmc.LOGINFO)
-                        search_history.append(f"搜索(DeepSeek提取的英文名): {english_title_from_deepseek} ({year})")
-                        results = runner.search(english_title_from_deepseek, year)
-                    if results:
-                        match = results[0]
-                        log(f"Match found: {match.get('title')} (ID: {match.get('id')})", xbmc.LOGINFO)
-                        unique_ids = {'tmdb': str(match.get('id'))}
-                        try:
+                    only_on_failure = settings.getSettingBool('deepseek_only_on_failure')
+
+                    # 3.1 Direct Search (Traditional)
+                    if not deepseek_extractor or only_on_failure:
+                        # If deepseek is off, OR it's enabled but we only use it on failure
+                        search_history.append(f"搜索(传统): {title} ({year})")
+                        results = runner.search(title, year)
+                        
+                        if results:
+                            # Traditional search success
+                            match = results[0]
+                            log(f"Match found (Traditional): {match.get('title')} (ID: {match.get('id')})", xbmc.LOGINFO)
+                            unique_ids = {'tmdb': str(match.get('id'))}
                             details = runner.get_details(unique_ids)
-                        except Exception as e:
-                            log(f"GetDetails Error: {e}", xbmc.LOGERROR)
-                    else:
-                        log(f"No results found for {title}", xbmc.LOGWARNING)
+
+                    # 3.2 DeepSeek Search (If needed)
+                    # Condition: DeepSeek is enabled AND (it's not 'only_on_failure' OR previous search failed)
+                    should_use_deepseek = deepseek_extractor and (not details)
+                    
+                    if should_use_deepseek:
+                        if only_on_failure:
+                            log("Traditional search failed. Trying DeepSeek...", xbmc.LOGINFO)
+                            
+                        ds_title, ds_year, ds_english = self.extract_info_via_deepseek(raw_name, deepseek_extractor)
+                        
+                        # Use DeepSeek info if available
+                        search_title = ds_title
+                        search_year = ds_year
+                        if ds_title:
+                            search_history.append(f"搜索(DeepSeek): {search_title} ({search_year})")
+                            results = runner.search(search_title, search_year)
+                        
+                        # Fallback to English title if primary search failed
+                        if not results and ds_english and ds_english != search_title:
+                            log(f"No results for DeepSeek Chinese title. Trying DeepSeek English title: {ds_english}", xbmc.LOGINFO)
+                            search_history.append(f"搜索(DeepSeek英文): {ds_english} ({search_year})")
+                            results = runner.search(ds_english, search_year)
+                            
+                        if results:
+                            match = results[0]
+                            log(f"Match found (DeepSeek): {match.get('title')} (ID: {match.get('id')})", xbmc.LOGINFO)
+                            unique_ids = {'tmdb': str(match.get('id'))}
+                            details = runner.get_details(unique_ids)
+                        else:
+                            log(f"No results found via DeepSeek for {search_title}", xbmc.LOGWARNING)
+
                 except Exception as e:
                     log(f"Search Error: {e}", xbmc.LOGERROR)
 

@@ -189,4 +189,6 @@ msgctxt "#33015"
 msgid "API Key File"
 msgstr "DeepSeek API Key 文件"
 
-
+msgctxt "#33016"
+msgid "deepseek only on failure"
+msgstr "仅在搜索电影失败时才使用DeepSeek重试"

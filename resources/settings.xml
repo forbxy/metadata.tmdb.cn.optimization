@@ -422,6 +422,11 @@
 						<heading>33015</heading>
 					</control>
 				</setting>
+				<setting id="deepseek_only_on_failure" type="boolean" label="33016" help="">
+					<level>0</level>
+					<default>true</default>
+					<control type="toggle"/>
+				</setting>
 			</group>
 		</category>
 		<category id="proxy_custom" label="32005">
