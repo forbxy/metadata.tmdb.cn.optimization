@@ -5,7 +5,7 @@
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 
 $SourceDir = $PSScriptRoot
-$TargetDir = "C:\Users\bxy\AppData\Roaming\Kodi\addons\metadata.tmdb.cn.optimization"
+$TargetDir = "$env:APPDATA\Kodi\addons\metadata.tmdb.cn.optimization"
 
 Write-Host "Starting deployment to dev environment..." -ForegroundColor Green
 Write-Host "Source Dir: $SourceDir"

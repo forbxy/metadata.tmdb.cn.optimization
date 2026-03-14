@@ -1703,5 +1703,10 @@ class KodiScraperSimulation:
                 xbmcgui.Dialog().textviewer("刮削失败列表 (按目录)", failed_msg)
 
 if __name__ == '__main__':
-    sim = KodiScraperSimulation()
-    sim.scan_and_process()
+    if len(sys.argv) > 1 and "action=cache_images" in sys.argv[1]:
+        from image_cacher import ImageCacher
+        cacher = ImageCacher()
+        cacher.start()
+    else:
+        sim = KodiScraperSimulation()
+        sim.scan_and_process()

@@ -204,3 +204,7 @@ msgstr "忽略本地 NFO 和图片"
 msgctxt "#33021"
 msgid "Skip BDMV Folder"
 msgstr "跳过包含 BDMV 的原盘文件夹"
+
+msgctxt "#33040"
+msgid "Run video images cache tool"
+msgstr "运行电影图片缓存工具"
