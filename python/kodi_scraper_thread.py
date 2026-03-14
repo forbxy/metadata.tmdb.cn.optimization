@@ -1572,7 +1572,7 @@ class KodiScraperSimulation:
         icon_path = ADDON_SETTINGS.getAddonInfo('icon')
         
         self.pDialog = xbmcgui.DialogProgress()
-        heading = "TMDB CN Optimization - 多线程扫描中..."
+        heading = f"TMDB CN Optimization - {self.MAX_WORKERS}线程扫描中..."
         self.pDialog.create(heading, "初始化中...")
         
         try:
