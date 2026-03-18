@@ -1571,6 +1571,51 @@ class KodiScraperSimulation:
         log("Starting Scan...", xbmc.LOGINFO)
         icon_path = ADDON_SETTINGS.getAddonInfo('icon')
         
+        try:
+            req = {"jsonrpc": "2.0", "method": "Settings.GetSettingValue", "params": {"setting": "myvideos.extractflags"}, "id": 1}
+            res = json.loads(xbmc.executeJSONRPC(json.dumps(req)))
+            if res.get("result", {}).get("value") is True:
+                extend_cfg_path = xbmcvfs.translatePath("special://profile/addon_data/metadata.tmdb.cn.optimization/settings_extend.json")
+                dont_ask = False
+                if os.path.exists(extend_cfg_path):
+                    try:
+                        with open(extend_cfg_path, "r", encoding="utf-8") as f:
+                            cfg = json.loads(f.read())
+                            dont_ask = cfg.get("dont_ask_extractflags", False)
+                    except:
+                        pass
+                
+                if not dont_ask:
+                    ret = xbmcgui.Dialog().yesnocustom(
+                        "建议关闭设置项",
+                        "检测到【设置-媒体-视频-从文件中提取视频信息】处于[COLOR yellow]开启[/COLOR]状态。\n此设置在远端网盘或者高延迟环境下，会导致打开视频媒体库列表时严重卡顿。\n\n是否立即为您关闭该设置？\n",
+                        customlabel="不再提示",
+                        nolabel="否(不关闭)",
+                        yeslabel="是(立即关闭)"
+                    )
+                    if ret == 1:
+                        set_req = {"jsonrpc": "2.0", "method": "Settings.SetSettingValue", "params": {"setting": "myvideos.extractflags", "value": False}, "id": 2}
+                        xbmc.executeJSONRPC(json.dumps(set_req))
+                        log("Disabled myvideos.extractflags by user prompt.", xbmc.LOGINFO)
+                    elif ret == 2:
+                        try:
+                            cfg = {}
+                            if os.path.exists(extend_cfg_path):
+                                with open(extend_cfg_path, "r", encoding="utf-8") as f:
+                                    try: cfg = json.loads(f.read())
+                                    except: pass
+                            if "ignored_tips" not in cfg or not isinstance(cfg["ignored_tips"], dict):
+                                cfg["ignored_tips"] = {}
+                            cfg["ignored_tips"]["myvideos.extractflags"] = True
+                            os.makedirs(os.path.dirname(extend_cfg_path), exist_ok=True)
+                            with open(extend_cfg_path, "w", encoding="utf-8") as f:
+                                f.write(json.dumps(cfg, indent=4))
+                            log("User selected ignored_tips myvideos.extractflags, saved.", xbmc.LOGINFO)
+                        except Exception as ex:
+                            log(f"Write settings_extend.json Error: {ex}", xbmc.LOGWARNING)
+        except Exception as e:
+            log(f"Check extractflags Error: {e}", xbmc.LOGWARNING)
+
         self.pDialog = xbmcgui.DialogProgress()
         heading = f"TMDB CN Optimization - {self.MAX_WORKERS}线程扫描中..."
         self.pDialog.create(heading, "初始化中...")
