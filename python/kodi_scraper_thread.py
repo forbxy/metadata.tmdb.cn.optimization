@@ -25,8 +25,11 @@ if script_dir not in sys.path:
 from scraper_direct import ScraperRunner
 from lib.tmdbscraper_direct import dns_override
 
+
 def log(message, level=xbmc.LOGDEBUG):
     xbmc.log(f"[TMDB Thread] {message}", level)
+
+
 
 class SettingsProxy:
     def __init__(self, base_settings, overrides):
@@ -1201,16 +1204,16 @@ class KodiScraperSimulation:
             
         return title, year, english_title
 
-    def process_file(self, file_path, settings, video_files_in_dir=1, deepseek_extractor=None):
+    def process_file(self, file_path, settings, video_files_in_dir=1, deepseek_extractor=None, files_map=None):
         search_history = []
         try:
-            # Prepare directory listing once for all local checks (Optimization)
-            dir_path = os.path.dirname(file_path)
-            files_map = {}
-            try:
-                _, files = xbmcvfs.listdir(dir_path)
-                files_map = {f.lower(): f for f in files}
-            except: pass
+            if files_map is None:
+                files_map = {}
+                try:
+                    dir_path = os.path.dirname(file_path)
+                    _, files = xbmcvfs.listdir(dir_path)
+                    files_map = {f.lower(): f for f in files}
+                except: pass
 
             normalized_path = file_path.replace("\\", "/")
             raw_name = urllib.parse.unquote(normalized_path.split("/")[-1])
@@ -1415,6 +1418,7 @@ class KodiScraperSimulation:
 
         try:
             dirs, files = xbmcvfs.listdir(path)
+            files_map = {f.lower(): f for f in files}
         except Exception:
             log(f"Error listing dir: {path}", xbmc.LOGERROR)
             return
@@ -1476,7 +1480,7 @@ class KodiScraperSimulation:
                 if self.check_should_stop(): break
 
                 # Submit new task
-                future = self.executor.submit(self.process_file, full_path, settings, video_files_in_dir, deepseek_extractor=deepseek_extractor)
+                future = self.executor.submit(self.process_file, full_path, settings, video_files_in_dir, deepseek_extractor=deepseek_extractor, files_map=files_map)
                 self.running_futures.add(future)
                 self.future_map[future] = (full_path, settings, item_weight_process, merge_vers)
         
