@@ -1416,6 +1416,26 @@ class KodiScraperSimulation:
             log(f"SKIPPING Directory {path}: Path noUpdate", xbmc.LOGINFO)
             return
 
+        # Check if this path has been explicitly set to a different content type or scraper
+        # e.g. subdirectory changed to "tvshows" with a TV show scraper
+        normalized_check = path.replace("\\", "/")
+        if not normalized_check.endswith("/"):
+            normalized_check += "/"
+        if normalized_check in self.path_cache:
+            path_data = self.path_cache[normalized_check]
+            p_content = path_data.get('content', '')
+            p_scraper = path_data.get('scraper', '')
+            # If this path has explicit content set to something other than 'movies', skip it
+            if p_content and p_content != 'movies':
+                log(f"SKIPPING Directory {path}: Content type is '{p_content}', not 'movies'", xbmc.LOGINFO)
+                self.deal_process += path_total_process
+                return
+            # If this path has an explicit scraper that is not ours, skip it
+            if p_scraper and p_scraper != 'metadata.tmdb.cn.optimization':
+                log(f"SKIPPING Directory {path}: Scraper is '{p_scraper}', not ours", xbmc.LOGINFO)
+                self.deal_process += path_total_process
+                return
+
         try:
             dirs, files = xbmcvfs.listdir(path)
             files_map = {f.lower(): f for f in files}
