@@ -1771,6 +1771,15 @@ class KodiScraperSimulation:
                     lines.append("")
                         
                 failed_msg = "\n".join(lines)
+                
+                # Also log the failed list
+                log("[FAILED LIST] 刮削失败列表:", xbmc.LOGINFO)
+                for d in sorted(failed_map.keys()):
+                    log(f"  目录: {d}", xbmc.LOGINFO)
+                    for f_name, hist in sorted(failed_map[d], key=lambda x: x[0]):
+                        hist_str = " | ".join(hist) if hist else ""
+                        log(f"    失败: {f_name}  {hist_str}", xbmc.LOGINFO)
+
                 xbmcgui.Dialog().textviewer("刮削失败列表 (按目录)", failed_msg)
 
 if __name__ == '__main__':
