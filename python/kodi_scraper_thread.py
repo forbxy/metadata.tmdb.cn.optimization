@@ -30,6 +30,47 @@ def log(message, level=xbmc.LOGDEBUG):
     xbmc.log(f"[TMDB Thread] {message}", level)
 
 
+class _RowProxy:
+    """Allows both dict-like (row['col']) and index (row[0]) access for MySQL DictCursor rows."""
+    __slots__ = ('_dict', '_values')
+    def __init__(self, row_dict):
+        self._dict = row_dict
+        self._values = list(row_dict.values())
+    def __getitem__(self, key):
+        if isinstance(key, int):
+            return self._values[key]
+        return self._dict[key]
+    def __contains__(self, key):
+        return key in self._dict
+    def __bool__(self):
+        return True
+
+
+class _MySQLCursorWrapper:
+    """Wraps a pymysql DictCursor to auto-convert ? placeholders to %s and wrap rows for index access."""
+    def __init__(self, cursor):
+        self._cursor = cursor
+    
+    def execute(self, sql, params=None):
+        sql = sql.replace('?', '%s')
+        if params is not None:
+            return self._cursor.execute(sql, params)
+        return self._cursor.execute(sql)
+    
+    def fetchone(self):
+        row = self._cursor.fetchone()
+        if row is not None:
+            return _RowProxy(row)
+        return None
+    
+    def fetchall(self):
+        return [_RowProxy(r) for r in self._cursor.fetchall()]
+    
+    @property
+    def lastrowid(self):
+        return self._cursor.lastrowid
+
+
 
 class SettingsProxy:
     def __init__(self, base_settings, overrides):
@@ -63,14 +104,36 @@ class SettingsProxy:
         return self.base_settings.setSetting(key, value)
 
 class KodiDatabase:
-    def __init__(self, db_path):
+    def __init__(self, db_path=None, mysql_config=None):
+        """
+        db_path: SQLite file path (used when mysql_config is None)
+        mysql_config: dict with keys: host, port, user, password, database
+        """
         self.db_path = db_path
+        self.mysql_config = mysql_config
+        self.is_mysql = mysql_config is not None
         self.conn = None
         
     def connect(self):
         try:
-            self.conn = sqlite3.connect(self.db_path)
-            self.conn.row_factory = sqlite3.Row
+            if self.is_mysql:
+                import pymysql
+                cfg = self.mysql_config
+                self.conn = pymysql.connect(
+                    host=cfg['host'],
+                    port=int(cfg['port']),
+                    user=cfg['user'],
+                    password=cfg['password'],
+                    database=cfg['database'],
+                    charset='utf8mb3',
+                    collation='utf8mb3_general_ci',
+                    cursorclass=pymysql.cursors.DictCursor,
+                    autocommit=False
+                )
+                log(f"Connected to MySQL: {cfg['host']}:{cfg['port']}/{cfg['database']}", xbmc.LOGINFO)
+            else:
+                self.conn = sqlite3.connect(self.db_path)
+                self.conn.row_factory = sqlite3.Row
         except Exception as e:
             log(f"DB Connect Error: {e}", xbmc.LOGERROR)
 
@@ -78,6 +141,13 @@ class KodiDatabase:
         if self.conn:
             self.conn.close()
             self.conn = None
+
+    def cursor(self):
+        """Returns a cursor. For MySQL, wraps it to auto-convert ? to %s and support index-based row access."""
+        raw = self.conn.cursor()
+        if self.is_mysql:
+            return _MySQLCursorWrapper(raw)
+        return raw
 
     def _prepare_string_array(self, items, separator=" / "):
         if isinstance(items, list):
@@ -90,7 +160,7 @@ class KodiDatabase:
         if not start_path.endswith("/"):
             start_path += "/"
             
-        cur = self.conn.cursor()
+        cur = self.cursor()
         cur.execute("SELECT idPath FROM path WHERE strPath=?", (start_path,))
         row = cur.fetchone()
         if row: return row[0]
@@ -119,7 +189,7 @@ class KodiDatabase:
 
     def get_or_create_file(self, file_path, id_path):
         filename = os.path.basename(file_path)
-        cur = self.conn.cursor()
+        cur = self.cursor()
         cur.execute("SELECT idFile FROM files WHERE idPath=? AND strFilename=?", (id_path, filename))
         row = cur.fetchone()
         if row: return row[0]
@@ -130,7 +200,7 @@ class KodiDatabase:
         
     def get_or_create_set(self, set_name, set_overview=""):
         if not set_name: return None
-        cur = self.conn.cursor()
+        cur = self.cursor()
         cur.execute("SELECT idSet FROM sets WHERE strSet=?", (set_name,))
         row = cur.fetchone()
         if row: return row[0]
@@ -148,7 +218,7 @@ class KodiDatabase:
             return paths_map
             
         try:
-            cur = self.conn.cursor()
+            cur = self.cursor()
             # Select necessary columns. Note: columns might vary by Kodi version, but these are standard enough.
             # Use dictionary cursor or access by index
             cur.execute("SELECT strPath, strSettings, strScraper, strContent, noUpdate, exclude FROM path")
@@ -175,7 +245,7 @@ class KodiDatabase:
 
     def add_link(self, table, name, media_id, media_type):
         if not name: return
-        cur = self.conn.cursor()
+        cur = self.cursor()
         id_col = table + "_id"
         cur.execute(f"SELECT {id_col} FROM {table} WHERE name=?", (name,))
         row = cur.fetchone()
@@ -197,7 +267,7 @@ class KodiDatabase:
         4. Insert new version link.
         """
         try:
-            cur = self.conn.cursor()
+            cur = self.cursor()
 
             # Helper to get decoded buffer filename
             def get_decoded_name(path):
@@ -275,7 +345,7 @@ class KodiDatabase:
             return 40400 # Default
         
         try:
-            cur = self.conn.cursor()
+            cur = self.cursor()
             # Check if type exists
             cur.execute("SELECT id FROM videoversiontype WHERE name=?", (version_name,))
             row = cur.fetchone()
@@ -292,7 +362,7 @@ class KodiDatabase:
 
     def save_movie(self, id_file, details, file_path="", merge_versions=False):
         if not self.conn: return None
-        cur = self.conn.cursor()
+        cur = self.cursor()
         info = details.get('info', {})
         available_art = details.get('available_art', {})
         
@@ -345,7 +415,7 @@ class KodiDatabase:
         premiered = info.get('premiered', '')
 
         # c08: Thumb (XML Collection)
-        c08 = self._build_image_xml(available_art)
+        c08 = self._build_image_xml(available_art, movie_title=c00)
         
         # Fallback: If c08 empty, try info['thumb']
         if not c08 and info.get('thumb'):
@@ -476,7 +546,10 @@ class KodiDatabase:
         if not s: return ""
         return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
 
-    def _build_image_xml(self, available_art):
+    # MySQL TEXT column limit: 65,535 bytes. Limit art entries per aspect to stay within.
+    _MAX_ART_PER_ASPECT = 20
+
+    def _build_image_xml(self, available_art, movie_title=""):
         """
         Builds Kodi-compatible XML string for c08 (thumbnails/posters/logos etc).
         Format: <thumb aspect="..." preview="...">url</thumb>
@@ -486,6 +559,7 @@ class KodiDatabase:
             return ""
             
         xml_parts = []
+        aspect_counts = {}
         for aspect, items in available_art.items():
             # 'fanart' key usually mapped to c20. 
             # Note: 'set.fanart' MUST be included in c08 as per user requirement.
@@ -495,14 +569,20 @@ class KodiDatabase:
             if not isinstance(items, list):
                 items = [items]
             
-            for item in items:
+            aspect_counts[aspect] = len(items)
+            for item in items[:self._MAX_ART_PER_ASPECT]:
                 url = item.get('url','') if isinstance(item, dict) else item
                 preview = item.get('preview','') if isinstance(item, dict) else ''
                 
                 if url:
                     xml_parts.append(f'<thumb spoof="" cache="" aspect="{aspect}" preview="{self._xml_escape(preview)}">{self._xml_escape(url)}</thumb>')
         
-        return "".join(xml_parts)
+        result = "".join(xml_parts)
+        result_bytes = len(result.encode('utf-8'))
+        # log(f"[c08] {movie_title} art counts: {aspect_counts}, total_aspects={len(aspect_counts)}, xml_bytes={result_bytes}", xbmc.LOGINFO)
+        if result_bytes > 60000:
+            log(f"[c08] WARNING: {movie_title} xml_bytes={result_bytes} approaching TEXT limit (65535)!", xbmc.LOGWARNING)
+        return result
 
     def _build_fanart_xml(self, available_art):
         """
@@ -527,9 +607,16 @@ class KodiDatabase:
         xml_parts.append("</fanart>")
         return "".join(xml_parts)
 
+    def _sanitize_utf8mb3(self, text):
+        """Remove characters outside BMP (> 3 bytes in UTF-8) for MySQL utf8mb3 columns."""
+        if not text or not self.is_mysql:
+            return text
+        return ''.join(c for c in text if ord(c) <= 0xFFFF)
+
     def _add_person_link(self, name, role, media_id, media_type):
         if not name: return
-        cur = self.conn.cursor()
+        name = self._sanitize_utf8mb3(name)
+        cur = self.cursor()
         cur.execute("SELECT actor_id FROM actor WHERE name=?", (name,))
         row = cur.fetchone()
         if row: actor_id = row[0]
@@ -543,7 +630,8 @@ class KodiDatabase:
     def _add_actor(self, actor, media_id, media_type):
         name = actor.get('name')
         if not name: return
-        cur = self.conn.cursor()
+        name = self._sanitize_utf8mb3(name)
+        cur = self.cursor()
         cur.execute("SELECT actor_id FROM actor WHERE name=?", (name,))
         row = cur.fetchone()
         
@@ -606,6 +694,7 @@ class KodiScraperSimulation:
         self.running_futures = set()
         self.future_map = {}
         self.failed_items = []
+        self.db = None
 
         
 
@@ -642,7 +731,7 @@ class KodiScraperSimulation:
             return
 
         try:
-            cur = self.db.conn.cursor()
+            cur = self.db.cursor()
             # Only load files that actually have a movie entry in the movie table.
             # Kodi clears the movie table when library is reset, but leaves files table intact.
             # Using just files table would cause false positives (thinking files are already scraped).
@@ -878,6 +967,76 @@ class KodiScraperSimulation:
                 
         latest_db = max(video_dbs, key=get_version)
         return os.path.join(db_dir, latest_db)
+
+    def _parse_mysql_from_xml(self, xml_path):
+        """Parse MySQL videodatabase config from a single advancedsettings.xml file. Returns dict or None."""
+        try:
+            if not xbmcvfs.exists(xml_path):
+                return None
+            tree = ET.parse(xml_path)
+            root = tree.getroot()
+            vdb = root.find("videodatabase")
+            if vdb is None:
+                return None
+            db_type = vdb.findtext("type", "").strip().lower()
+            if db_type != "mysql":
+                return None
+
+            host = vdb.findtext("host", "").strip()
+            port = vdb.findtext("port", "3306").strip()
+            user = vdb.findtext("user", "").strip()
+            password = vdb.findtext("pass", "").strip()
+            db_name = vdb.findtext("name", "").strip()
+
+            if not host or not user:
+                log(f"MySQL config incomplete in {xml_path}", xbmc.LOGWARNING)
+                return None
+
+            return {
+                'host': host,
+                'port': int(port),
+                'user': user,
+                'password': password,
+                'database': db_name
+            }
+        except Exception as e:
+            log(f"Error parsing {xml_path} for MySQL: {e}", xbmc.LOGWARNING)
+            return None
+
+    def get_mysql_config(self):
+        """
+        Parses advancedsettings.xml to check if MySQL is configured for videodatabase.
+        Returns dict {host, port, user, password, database} or None.
+        Checks special://userdata/ first, then special://profile/ can override (consistent with Kodi).
+        """
+        result = None
+        for special_path in ("special://userdata/advancedsettings.xml",
+                             "special://profile/advancedsettings.xml"):
+            xml_path = translatePath(special_path)
+            cfg = self._parse_mysql_from_xml(xml_path)
+            if cfg:
+                log(f"MySQL config found in {special_path}", xbmc.LOGINFO)
+                result = cfg
+
+        if result and not result['database']:
+            db_dir = translatePath("special://database")
+            try:
+                files = xbmcvfs.listdir(db_dir)[1]
+                video_dbs = [f for f in files if f.startswith("MyVideos") and f.endswith(".db")]
+                if video_dbs:
+                    def get_ver(n):
+                        m = re.search(r'MyVideos(\d+)\.db', n)
+                        return int(m.group(1)) if m else 0
+                    version = max(get_ver(f) for f in video_dbs)
+                    result['database'] = f"MyVideos{version}"
+                else:
+                    result['database'] = "MyVideos131"
+            except:
+                result['database'] = "MyVideos131"
+
+        if result:
+            log(f"MySQL config detected: {result['host']}:{result['port']}/{result['database']}", xbmc.LOGINFO)
+        return result
 
     def scan_local_art(self, file_path, details, video_files_in_dir=1, files_map=None):
         """
@@ -1651,16 +1810,30 @@ class KodiScraperSimulation:
             self.executor = ThreadPoolExecutor(max_workers=self.MAX_WORKERS)
             log(f"Initialized ThreadPoolExecutor with {self.MAX_WORKERS} workers.", xbmc.LOGINFO)
 
-            # Initialize DB
-            db_path = self.get_latest_db_path()
-            if db_path:
-                self.db = KodiDatabase(db_path)
-                self.db.connect()
+            # Initialize DB - try MySQL first, fall back to SQLite
+            mysql_config = self.get_mysql_config()
+            if mysql_config:
+                try:
+                    self.db = KodiDatabase(mysql_config=mysql_config)
+                    self.db.connect()
+                    log("Using MySQL database.", xbmc.LOGINFO)
+                except Exception as e:
+                    log(f"MySQL connection failed: {e}, falling back to SQLite.", xbmc.LOGWARNING)
+                    self.db = None
+            
+            if not self.db:
+                db_path = self.get_latest_db_path()
+                if db_path:
+                    self.db = KodiDatabase(db_path=db_path)
+                    self.db.connect()
+                    log("Using SQLite database.", xbmc.LOGINFO)
+                else:
+                    self.db = None
+                    log("No Kodi Database found. Simulation only.", xbmc.LOGWARNING)
+            
+            if self.db:
                 # Load path cache dynamically
                 self.load_path_cache()
-            else:
-                self.db = None
-                log("No Kodi Database found. Simulation only.", xbmc.LOGWARNING)
             
             self.load_scraped_files()
             
