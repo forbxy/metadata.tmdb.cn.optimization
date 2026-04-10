@@ -643,8 +643,10 @@ class KodiScraperSimulation:
 
         try:
             cur = self.db.conn.cursor()
-            # Join with path table to get full paths
-            query = "SELECT p.strPath, f.strFilename FROM files f JOIN path p ON f.idPath = p.idPath"
+            # Only load files that actually have a movie entry in the movie table.
+            # Kodi clears the movie table when library is reset, but leaves files table intact.
+            # Using just files table would cause false positives (thinking files are already scraped).
+            query = "SELECT p.strPath, f.strFilename FROM files f JOIN path p ON f.idPath = p.idPath JOIN movie m ON m.idFile = f.idFile"
             cur.execute(query)
             rows = cur.fetchall()
             
@@ -1395,7 +1397,6 @@ class KodiScraperSimulation:
         Scans a path using xbmcvfs (supports dav://, smb://, etc.)
         """
         if self.check_should_stop(): return
-
         # Ensure trailing slash
         if not path.endswith("/") and not path.endswith("\\"):
             path += "/"
@@ -1484,6 +1485,7 @@ class KodiScraperSimulation:
                 
                 # Check scraped
                 if self.is_video_scraped(full_path):
+                    log(f"Already scraped, skipping: {full_path}", xbmc.LOGINFO)
                     self.deal_process += item_weight_process
                     if self.pDialog:
                         self.pDialog.update(int(self.deal_process * 100))
