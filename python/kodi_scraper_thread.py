@@ -1018,21 +1018,60 @@ class KodiScraperSimulation:
                 log(f"MySQL config found in {special_path}", xbmc.LOGINFO)
                 result = cfg
 
-        if result and not result['database']:
-            db_dir = translatePath("special://database")
+        if result:
+            # Kodi always appends schema version to the base name:
+            #   dbName = dbSettings.name + std::to_string(GetSchemaVersion())
+            # If <name> is empty, Kodi uses "MyVideos" as base name.
+            # We need to detect the full database name (base + version).
+            base_name = result['database'] if result['database'] else "MyVideos"
+            detected = False
+
+            # Try to detect by querying MySQL for existing databases matching base_name*
             try:
-                files = xbmcvfs.listdir(db_dir)[1]
-                video_dbs = [f for f in files if f.startswith("MyVideos") and f.endswith(".db")]
-                if video_dbs:
-                    def get_ver(n):
-                        m = re.search(r'MyVideos(\d+)\.db', n)
-                        return int(m.group(1)) if m else 0
-                    version = max(get_ver(f) for f in video_dbs)
-                    result['database'] = f"MyVideos{version}"
-                else:
-                    result['database'] = "MyVideos131"
-            except:
-                result['database'] = "MyVideos131"
+                import pymysql
+                tmp_conn = pymysql.connect(
+                    host=result['host'], port=result['port'],
+                    user=result['user'], password=result['password'],
+                    connect_timeout=5
+                )
+                try:
+                    with tmp_conn.cursor() as cur:
+                        cur.execute("SHOW DATABASES LIKE %s", (base_name + '%',))
+                        dbs = [row[0] for row in cur.fetchall()]
+                        if dbs:
+                            pattern = re.escape(base_name) + r'(\d+)'
+                            def get_ver(n):
+                                m = re.search(pattern, n)
+                                return int(m.group(1)) if m else 0
+                            best = max(dbs, key=get_ver)
+                            if get_ver(best) > 0:
+                                result['database'] = best
+                                detected = True
+                                log(f"Detected MySQL video database: {best}", xbmc.LOGINFO)
+                finally:
+                    tmp_conn.close()
+            except Exception as e:
+                log(f"Failed to detect MySQL video DB version: {e}", xbmc.LOGWARNING)
+
+            if not detected and base_name == "MyVideos":
+                # Fallback: scan local SQLite files (only useful for default name)
+                try:
+                    db_dir = translatePath("special://database")
+                    files = xbmcvfs.listdir(db_dir)[1]
+                    video_dbs = [f for f in files if f.startswith("MyVideos") and f.endswith(".db")]
+                    if video_dbs:
+                        def get_ver(n):
+                            m = re.search(r'MyVideos(\d+)\.db', n)
+                            return int(m.group(1)) if m else 0
+                        version = max(get_ver(f) for f in video_dbs)
+                        result['database'] = f"MyVideos{version}"
+                        detected = True
+                except:
+                    pass
+
+            if not detected:
+                result['database'] = base_name + "131"
+                log(f"Could not detect video DB version, falling back to {result['database']}", xbmc.LOGWARNING)
 
         if result:
             log(f"MySQL config detected: {result['host']}:{result['port']}/{result['database']}", xbmc.LOGINFO)
