@@ -47,34 +47,48 @@ def load_char_map():
     except Exception as e:
         xbmc.log(f'[TMDB Daemon] Failed to load char_map.json: {e}', xbmc.LOGERROR)
 
+MAX_HETERONYM_CHARS = 3  # 最多允许几个多音字参与排列组合，超出的取第一个读音
+MAX_ORIGINALTITLE_BYTES = 64 * 1024  # originaltitle 字段最大字节数
+
 def get_pinyin_permutations(text):
     if not text:
         return ""
     
-    # Convert each char to a list of possible initials
     char_initials = []
     for char in text:
-        if char in CHAR_MAP:
-            # Get all pinyin variations for this char
-            pinyins = CHAR_MAP[char]
-            # Extract initials and deduplicate preserving order
-            initials = []
-            seen = set()
-            for p in pinyins:
-                if p:
-                    init = p[0].upper()
-                    if init not in seen:
-                        seen.add(init)
-                        initials.append(init)
-            
-            if initials:
-                char_initials.append(initials)
-            else:
-                if char.isalnum():
-                    char_initials.append([char.upper()])
+        options = set()
+
+        pinyin_data = CHAR_MAP.get(char)
+        if not pinyin_data:
+            pinyin_data = CHAR_MAP.get(char.upper())
+
+        if pinyin_data:
+            readings = pinyin_data if isinstance(pinyin_data, list) else [pinyin_data]
+            for p in readings:
+                if p and isinstance(p, str):
+                    initial = p[0].upper()
+                    if "A" <= initial <= "Z":
+                        options.add(initial)
         else:
-            if char.isalnum():
-                char_initials.append([char.upper()])
+            c = char.upper()
+            if "A" <= c <= "Z":
+                options.add(c)
+
+        # 数字字符保留数字本身
+        c = char.upper()
+        if "0" <= c <= "9":
+            options.add(c)
+
+        if options:
+            char_initials.append(sorted(options)[:3])
+
+    # 限制多音字数量，超出的只保留第一个读音
+    heteronym_count = 0
+    for i, inits in enumerate(char_initials):
+        if len(inits) > 1:
+            heteronym_count += 1
+            if heteronym_count > MAX_HETERONYM_CHARS:
+                char_initials[i] = [inits[0]]
 
     # Generate Cartesian product
     try:
@@ -88,7 +102,19 @@ def get_pinyin_permutations(text):
             if r not in seen_res:
                 seen_res.add(r)
                 unique_results.append(r)
-        return "|".join(unique_results)
+        result = "|".join(unique_results)
+        if len(result.encode('utf-8')) > MAX_ORIGINALTITLE_BYTES:
+            # 超出64KB限制时截断
+            truncated = []
+            total_len = 0
+            for r in unique_results:
+                added = len(r.encode('utf-8')) + (1 if truncated else 0)  # +1 for |
+                if total_len + added > MAX_ORIGINALTITLE_BYTES:
+                    break
+                truncated.append(r)
+                total_len += added
+            result = "|".join(truncated)
+        return result
     except Exception as e:
         xbmc.log(f'[TMDB Daemon] Pinyin generation error: {e}', xbmc.LOGERROR)
         return text
