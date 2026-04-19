@@ -3,7 +3,7 @@ import shutil
 import fnmatch
 
 # 全局变量控制部署目标目录
-REMOTE = True
+REMOTE = False
 
 def main():
     print("Starting deployment to dev environment...")

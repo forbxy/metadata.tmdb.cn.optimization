@@ -294,7 +294,21 @@ def get_details(input_uniqueids, handle, settings, fail_silently=False):
     listitem = xbmcgui.ListItem(details['info']['title'], offscreen=True)
     infotag = listitem.getVideoInfoTag()
     set_info(infotag, details['info'])
-    infotag.setCast(build_cast(details['cast']))
+    cast = details['cast']
+    # Append directors/writers to cast so their thumbnails get written to actor/art tables
+    cast_names = {c['name'] for c in cast}
+    next_order = max((c.get('order', 0) for c in cast), default=-1) + 1
+    for person in details['info'].get('director', []):
+        if isinstance(person, dict) and person.get('thumbnail') and person['name'] not in cast_names:
+            cast.append({'name': person['name'], 'role': 'Director', 'thumbnail': person['thumbnail'], 'order': next_order})
+            cast_names.add(person['name'])
+            next_order += 1
+    for person in details['info'].get('credits', []):
+        if isinstance(person, dict) and person.get('thumbnail') and person['name'] not in cast_names:
+            cast.append({'name': person['name'], 'role': 'Writer', 'thumbnail': person['thumbnail'], 'order': next_order})
+            cast_names.add(person['name'])
+            next_order += 1
+    infotag.setCast(build_cast(cast))
     infotag.setUniqueIDs(details['uniqueids'], 'tmdb')
     infotag.setRatings(build_ratings(details['ratings']), find_defaultrating(details['ratings']))
     IMAGE_LIMIT = settings.getSettingInt('maxartwork')
@@ -313,8 +327,8 @@ def set_info(infotag: xbmc.InfoTagVideo, info_dict):
     infotag.setStudios(info_dict['studio'])
     infotag.setGenres(info_dict['genre'])
     infotag.setCountries(info_dict['country'])
-    infotag.setWriters(info_dict['credits'])
-    infotag.setDirectors(info_dict['director'])
+    infotag.setWriters([w['name'] if isinstance(w, dict) else w for w in info_dict['credits']])
+    infotag.setDirectors([d['name'] if isinstance(d, dict) else d for d in info_dict['director']])
     infotag.setPremiered(info_dict['premiered'])
     if 'tag' in info_dict:
         infotag.setTags(info_dict['tag'])

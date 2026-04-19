@@ -151,7 +151,10 @@ class KodiDatabase:
 
     def _prepare_string_array(self, items, separator=" / "):
         if isinstance(items, list):
-            return separator.join(items)
+            return separator.join(
+                item['name'] if isinstance(item, dict) else str(item)
+                for item in items
+            )
         return str(items) if items else ""
 
     def get_or_create_path(self, path):
@@ -613,16 +616,27 @@ class KodiDatabase:
             return text
         return ''.join(c for c in text if ord(c) <= 0xFFFF)
 
-    def _add_person_link(self, name, role, media_id, media_type):
+    def _add_person_link(self, person, role, media_id, media_type):
+        if isinstance(person, dict):
+            name = person.get('name', '')
+            thumb = person.get('thumbnail', '')
+        else:
+            name = person
+            thumb = ''
         if not name: return
         name = self._sanitize_utf8mb3(name)
         cur = self.cursor()
         cur.execute("SELECT actor_id FROM actor WHERE name=?", (name,))
         row = cur.fetchone()
-        if row: actor_id = row[0]
+        if row:
+            actor_id = row[0]
         else:
-            cur.execute("INSERT INTO actor (name) VALUES (?)", (name,))
+            cur.execute("INSERT INTO actor (name, art_urls) VALUES (?, ?)", (name, thumb))
             actor_id = cur.lastrowid
+        if thumb:
+            cur.execute("DELETE FROM art WHERE media_id=? AND media_type='actor' AND type='thumb'", (actor_id,))
+            cur.execute("INSERT INTO art (media_id, media_type, type, url) VALUES (?, ?, ?, ?)",
+                       (actor_id, 'actor', 'thumb', thumb))
         try: cur.execute(f"INSERT INTO {role}_link (actor_id, media_id, media_type) VALUES (?, ?, ?)", 
                    (actor_id, media_id, media_type))
         except: pass
@@ -1865,7 +1879,7 @@ class KodiScraperSimulation:
                 if db_path:
                     self.db = KodiDatabase(db_path=db_path)
                     self.db.connect()
-                    log("Using SQLite database.", xbmc.LOGINFO)
+                    log(f"Using SQLite database: {db_path}", xbmc.LOGINFO)
                 else:
                     self.db = None
                     log("No Kodi Database found. Simulation only.", xbmc.LOGWARNING)

@@ -304,8 +304,8 @@ class TMDBMovieScraper(object):
             'studio': _get_names(movie['production_companies']),
             'genre': _get_names(movie['genres']),
             'country': _get_names(movie['production_countries']),
-            'credits': _get_cast_members(movie['casts'], 'crew', 'Writing', ['Screenplay', 'Writer', 'Author']),
-            'director': _get_cast_members(movie['casts'], 'crew', 'Directing', ['Director']),
+            'credits': _get_cast_members(movie['casts'], 'crew', 'Writing', ['Screenplay', 'Writer', 'Author'], self._get_image_proxy(), self.urls['original']),
+            'director': _get_cast_members(movie['casts'], 'crew', 'Directing', ['Director'], self._get_image_proxy(), self.urls['original']),
             'premiered': movie['release_date'],
             'tag': _get_names(movie['keywords']['keywords'])
         }
@@ -452,10 +452,15 @@ def _parse_trailer(trailers, fallback):
 def _get_names(items):
     return [item['name'] for item in items] if items else []
 
-def _get_cast_members(casts, casttype, department, jobs):
+def _get_cast_members(casts, casttype, department, jobs, image_proxy='', base_url=''):
     result = []
+    seen = set()
     if casttype in casts:
         for cast in casts[casttype]:
-            if cast['department'] == department and cast['job'] in jobs and cast['name'] not in result:
-                result.append(cast['name'])
+            if cast['department'] == department and cast['job'] in jobs and cast['name'] not in seen:
+                seen.add(cast['name'])
+                thumb = ''
+                if image_proxy and base_url and cast.get('profile_path'):
+                    thumb = image_proxy + base_url + cast['profile_path']
+                result.append({'name': cast['name'], 'thumbnail': thumb})
     return result
