@@ -382,6 +382,15 @@ def _parse_artwork(movie, collection, urlbases, language, proxy_prefix=''):
         logos = _build_image_list_with_fallback(movie['images']['logos'], urlbases, language, proxy_prefix=proxy_prefix)
         fanart = _build_fanart_list(movie['images']['backdrops'], urlbases, proxy_prefix=proxy_prefix)
 
+    # Ensure TMDB's default poster (selected by language) is first
+    if movie.get('poster_path') and posters:
+        default_poster = movie['poster_path']
+        for i, p in enumerate(posters):
+            if p['url'].endswith(default_poster):
+                if i != 0:
+                    posters.insert(0, posters.pop(i))
+                break
+
     setposters = []
     setlandscape = []
     setfanart = []
