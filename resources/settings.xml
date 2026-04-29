@@ -416,11 +416,11 @@
 				</setting>
 				<setting id="deepseek_model" type="string" label="33013" help="">
 					<level>0</level>
-					<default>deepseek-chat</default>
+					<default>deepseek-v4-flash</default>
 					<constraints>
 						<options>
-							<option>deepseek-chat</option>
-							<option>deepseek-reasoner</option>
+							<option>deepseek-v4-flash</option>
+							<option>deepseek-v4-pro</option>
 						</options>
 					</constraints>
 					<control type="list" format="string">

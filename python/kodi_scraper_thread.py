@@ -1919,7 +1919,7 @@ class KodiScraperSimulation:
                                 with xbmcvfs.File(key_file) as f:
                                     ds_key = f.read().strip()
                                 if ds_key:
-                                    prompt_template = 'Parse filename to JSON: {"cn":"中文名","en":"英文名","year":"年份"}'
+                                    prompt_template = '解析文件名，返回json: {"cn":"中文名","en":"英文名","year":"年份"}'
                                     deepseek_extractor = DeepSeekExtractor(
                                         ds_key,
                                         'https://api.deepseek.com',
