@@ -3,3 +3,4 @@ __pycache__/
 dist/
 deploy_dev.ps1
 .claude/
+subtitle_translation_work/

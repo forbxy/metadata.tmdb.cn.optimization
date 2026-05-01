@@ -746,10 +746,10 @@ class KodiScraperSimulation:
 
         try:
             cur = self.db.cursor()
-            # Only load files that actually have a movie entry in the movie table.
+            # Load files that have a movie entry OR are linked as a video version.
             # Kodi clears the movie table when library is reset, but leaves files table intact.
             # Using just files table would cause false positives (thinking files are already scraped).
-            query = "SELECT p.strPath, f.strFilename FROM files f JOIN path p ON f.idPath = p.idPath JOIN movie m ON m.idFile = f.idFile"
+            query = "SELECT DISTINCT p.strPath, f.strFilename FROM files f JOIN path p ON f.idPath = p.idPath LEFT JOIN movie m ON m.idFile = f.idFile LEFT JOIN videoversion vv ON vv.idFile = f.idFile WHERE m.idFile IS NOT NULL OR vv.idFile IS NOT NULL"
             cur.execute(query)
             rows = cur.fetchall()
             
@@ -1409,8 +1409,8 @@ class KodiScraperSimulation:
                     english_title = t_en
                 if y_ds:
                     try:
-                        int(y_ds)
-                    except Exception as e:
+                        year = int(y_ds)
+                    except Exception:
                         year = None
                 log(f"DeepSeek Extracted: '{raw_name}' -> zh: '{title}', year: '{year}', en: '{english_title}' ", xbmc.LOGINFO)
         except Exception as e:
@@ -1484,11 +1484,12 @@ class KodiScraperSimulation:
                         # If deepseek is off, OR it's enabled but we only use it on failure
                         search_history.append(f"搜索(传统): {title} ({year})")
                         results = runner.search(title, year)
-                        
+                        log(f"Traditional search '{title}' ({year}) returned {len(results) if results else 0} results", xbmc.LOGINFO)
+
                         if results:
                             # Traditional search success
                             match = results[0]
-                            log(f"Match found (Traditional): {match.get('title')} (ID: {match.get('id')})", xbmc.LOGINFO)
+                            log(f"Match found (Traditional): {match.get('title')} ({match.get('release_date', '')}) [TMDB={match.get('id')}]", xbmc.LOGINFO)
                             unique_ids = {'tmdb': str(match.get('id'))}
                             details = runner.get_details(unique_ids)
 
@@ -1499,25 +1500,29 @@ class KodiScraperSimulation:
                     if should_use_deepseek:
                         if only_on_failure:
                             log("Traditional search failed. Trying DeepSeek...", xbmc.LOGINFO)
-                            
+                        else:
+                            log(f"Starting DeepSeek extraction for: {raw_name}", xbmc.LOGINFO)
+
                         ds_title, ds_year, ds_english = self.extract_info_via_deepseek(raw_name, deepseek_extractor)
-                        
+
                         # Use DeepSeek info if available
                         search_title = ds_title
                         search_year = ds_year
                         if ds_title:
                             search_history.append(f"搜索(DeepSeek): {search_title} ({search_year})")
                             results = runner.search(search_title, search_year)
-                        
+                            log(f"DeepSeek search '{search_title}' ({search_year}) returned {len(results) if results else 0} results", xbmc.LOGINFO)
+
                         # Fallback to English title if primary search failed
                         if not results and ds_english and ds_english != search_title:
                             log(f"No results for DeepSeek Chinese title. Trying DeepSeek English title: {ds_english}", xbmc.LOGINFO)
                             search_history.append(f"搜索(DeepSeek英文): {ds_english} ({search_year})")
                             results = runner.search(ds_english, search_year)
-                            
+                            log(f"DeepSeek English search '{ds_english}' ({search_year}) returned {len(results) if results else 0} results", xbmc.LOGINFO)
+
                         if results:
                             match = results[0]
-                            log(f"Match found (DeepSeek): {match.get('title')} (ID: {match.get('id')})", xbmc.LOGINFO)
+                            log(f"Match found (DeepSeek): {match.get('title')} ({match.get('release_date', '')}) [TMDB={match.get('id')}]", xbmc.LOGINFO)
                             unique_ids = {'tmdb': str(match.get('id'))}
                             details = runner.get_details(unique_ids)
                         else:

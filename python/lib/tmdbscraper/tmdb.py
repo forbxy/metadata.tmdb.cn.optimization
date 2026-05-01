@@ -41,7 +41,7 @@ class TMDBMovieScraper(object):
 
         def is_best(item):
             return item['title'].lower() == title and (
-                not year or item.get('release_date', '').startswith(year))
+                not year or item.get('release_date', '').startswith(str(year)))
 
         search_media_id = _parse_media_id(title)
         if search_media_id:
