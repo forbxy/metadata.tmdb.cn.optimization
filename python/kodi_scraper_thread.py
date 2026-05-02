@@ -30,6 +30,57 @@ def log(message, level=xbmc.LOGDEBUG):
     xbmc.log(f"[TMDB Thread] {message}", level)
 
 
+_DOC_KEYWORDS = [
+    '制作纪录', '制作特辑', '幕后', '花絮', '拍摄纪实', '幕后花絮', '製作特輯',
+    'making of', 'behind the scenes', 'featurette', 'making',
+]
+
+
+def _is_documentary(item):
+    """Check if a TMDB search result looks like a documentary/making-of."""
+    title = (item.get('title') or '').lower()
+    for kw in _DOC_KEYWORDS:
+        if kw in title:
+            return True
+    return False
+
+
+def _select_best_match(results, title, year):
+    """Select the best match from TMDB search results, avoiding documentaries
+    when there are better alternatives and the user isn't searching for one."""
+    if not results:
+        return None
+    if len(results) == 1:
+        return results[0]
+
+    # If the search title itself suggests a documentary, don't filter
+    search_looks_doc = _is_documentary({'title': title})
+
+    if search_looks_doc:
+        # User is searching for a documentary/making-of, trust the first result
+        return results[0]
+
+    docs = [r for r in results if _is_documentary(r)]
+    non_docs = [r for r in results if not _is_documentary(r)]
+
+    # Prefer non-documentary results
+    candidates = non_docs if non_docs else docs
+
+    # Among candidates, prefer ones whose title is contained in the search title
+    search_lower = title.lower()
+    title_matches = [r for r in candidates
+                     if (r.get('title') or '').lower() in search_lower
+                     or search_lower in (r.get('title') or '').lower()]
+    best = title_matches[0] if title_matches else candidates[0]
+
+    if docs and best in non_docs:
+        skipped = docs[0]
+        log(f"Skipped documentary '{skipped.get('title')}' [TMDB={skipped.get('id')}], "
+            f"using '{best.get('title')}' [TMDB={best.get('id')}] instead", xbmc.LOGINFO)
+
+    return best
+
+
 class _RowProxy:
     """Allows both dict-like (row['col']) and index (row[0]) access for MySQL DictCursor rows."""
     __slots__ = ('_dict', '_values')
@@ -1488,7 +1539,7 @@ class KodiScraperSimulation:
 
                         if results:
                             # Traditional search success
-                            match = results[0]
+                            match = _select_best_match(results, title, year)
                             log(f"Match found (Traditional): {match.get('title')} ({match.get('release_date', '')}) [TMDB={match.get('id')}]", xbmc.LOGINFO)
                             unique_ids = {'tmdb': str(match.get('id'))}
                             details = runner.get_details(unique_ids)
@@ -1521,7 +1572,7 @@ class KodiScraperSimulation:
                             log(f"DeepSeek English search '{ds_english}' ({search_year}) returned {len(results) if results else 0} results", xbmc.LOGINFO)
 
                         if results:
-                            match = results[0]
+                            match = _select_best_match(results, search_title, search_year)
                             log(f"Match found (DeepSeek): {match.get('title')} ({match.get('release_date', '')}) [TMDB={match.get('id')}]", xbmc.LOGINFO)
                             unique_ids = {'tmdb': str(match.get('id'))}
                             details = runner.get_details(unique_ids)

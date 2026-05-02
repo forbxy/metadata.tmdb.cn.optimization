@@ -40,8 +40,18 @@ class TMDBMovieScraper(object):
     def search(self, title, year=None):
 
         def is_best(item):
-            return item['title'].lower() == title and (
-                not year or item.get('release_date', '').startswith(str(year)))
+            item_title = item['title'].lower()
+            search_title = title.lower()
+            year_ok = not year or item.get('release_date', '').startswith(str(year))
+            if not year_ok:
+                return False
+            if item_title == search_title:
+                return True
+            # Substring match: clean title is often embedded in a noisy search query
+            if len(item_title) >= 3 and len(search_title) >= 3:
+                if item_title in search_title or search_title in item_title:
+                    return True
+            return False
 
         search_media_id = _parse_media_id(title)
         if search_media_id:
