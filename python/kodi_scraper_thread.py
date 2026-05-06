@@ -980,9 +980,8 @@ class KodiScraperSimulation:
         # 4. Apply CleanString regexps (clutter removal)
         for regex in self.video_clean_string_regexps:
             match = regex.search(str_title_and_year)
-            if match:
-                # RegFind returns start index. We resize string to that index.
-                # In Python, we slice.
+            # Match Kodi C++ semantics: trim only if match starts after index 0.
+            if match and match.start() > 0:
                 str_title_and_year = str_title_and_year[:match.start()]
         
         # 5. Clean Chars
@@ -1533,8 +1532,12 @@ class KodiScraperSimulation:
                     # 3.1 Direct Search (Traditional)
                     if not deepseek_extractor or only_on_failure:
                         # If deepseek is off, OR it's enabled but we only use it on failure
-                        search_history.append(f"搜索(传统): {title} ({year})")
-                        results = runner.search(title, year)
+                        results, traditional_history = runner.search_with_history(title, year)
+                        if traditional_history:
+                            for h in traditional_history:
+                                search_history.append(f"搜索(传统): {h}")
+                        else:
+                            search_history.append(f"搜索(传统): {title} ({year})")
                         log(f"Traditional search '{title}' ({year}) returned {len(results) if results else 0} results", xbmc.LOGINFO)
 
                         if results:
@@ -1560,16 +1563,27 @@ class KodiScraperSimulation:
                         search_title = ds_title
                         search_year = ds_year
                         if ds_title:
-                            search_history.append(f"搜索(DeepSeek): {search_title} ({search_year})")
-                            results = runner.search(search_title, search_year)
+                            results, deepseek_history = runner.search_with_history(search_title, search_year)
+                            if deepseek_history:
+                                for h in deepseek_history:
+                                    search_history.append(f"搜索(DeepSeek): {h}")
+                            else:
+                                search_history.append(f"搜索(DeepSeek): {search_title} ({search_year})")
                             log(f"DeepSeek search '{search_title}' ({search_year}) returned {len(results) if results else 0} results", xbmc.LOGINFO)
 
                         # Fallback to English title if primary search failed
                         if not results and ds_english and ds_english != search_title:
                             log(f"No results for DeepSeek Chinese title. Trying DeepSeek English title: {ds_english}", xbmc.LOGINFO)
-                            search_history.append(f"搜索(DeepSeek英文): {ds_english} ({search_year})")
-                            results = runner.search(ds_english, search_year)
+                            results, deepseek_en_history = runner.search_with_history(ds_english, search_year)
+                            if deepseek_en_history:
+                                for h in deepseek_en_history:
+                                    search_history.append(f"搜索(DeepSeek英文): {h}")
+                            else:
+                                search_history.append(f"搜索(DeepSeek英文): {ds_english} ({search_year})")
                             log(f"DeepSeek English search '{ds_english}' ({search_year}) returned {len(results) if results else 0} results", xbmc.LOGINFO)
+
+                        if not ds_title and not ds_english:
+                            search_history.append("搜索(DeepSeek): 未提取到可用标题")
 
                         if results:
                             match = _select_best_match(results, search_title, search_year)
@@ -1612,8 +1626,11 @@ class KodiScraperSimulation:
             
             # process_file returns 'details' or {'is_failed': True, 'history': []} or None
             details = None
-            try: details = f.result()
-            except: details = None
+            try:
+                details = f.result()
+            except Exception as e:
+                log(f"Future execution error for {f_path}: {traceback.format_exc()}", xbmc.LOGERROR)
+                details = {'is_failed': True, 'history': [f"任务异常: {e}"]}
             
             self.stats_processed += 1
             if weight:
@@ -1626,6 +1643,12 @@ class KodiScraperSimulation:
             if details and isinstance(details, dict) and details.get('is_failed'):
                 is_failed = True
                 failure_history = details.get('history', [])
+                if isinstance(failure_history, str):
+                    failure_history = [failure_history]
+                elif failure_history is None:
+                    failure_history = []
+                elif not isinstance(failure_history, list):
+                    failure_history = [str(failure_history)]
                 details = None # Clear details to trigger failure block below
 
             if details and not is_failed:
@@ -1649,6 +1672,8 @@ class KodiScraperSimulation:
             else:
                 self.stats_failed += 1
                 log(f"Task Failed or Returned None for {f_path}", xbmc.LOGWARNING)
+                if not failure_history:
+                    failure_history = ["未记录到搜索历史（任务提前失败或返回空）"]
                 # Store object with failure info
                 self.failed_items.append({
                     'path': f_path,
@@ -2031,6 +2056,13 @@ class KodiScraperSimulation:
                         f_path = item.get('path')
                         history = item.get('history', [])
 
+                    if isinstance(history, str):
+                        history = [history]
+                    elif history is None:
+                        history = []
+                    elif not isinstance(history, list):
+                        history = [str(history)]
+
                     try: decoded_path = urllib.parse.unquote(f_path)
                     except: decoded_path = f_path
                     
@@ -2069,6 +2101,9 @@ if __name__ == '__main__':
         from image_cacher import ImageCacher
         cacher = ImageCacher()
         cacher.start()
+    elif len(sys.argv) > 1 and "action=check_unscraped_media" in sys.argv[1]:
+        from check_unscraped_media import run_check_unscraped_media
+        run_check_unscraped_media()
     else:
         sim = KodiScraperSimulation()
         sim.scan_and_process()

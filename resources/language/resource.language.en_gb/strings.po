@@ -143,3 +143,7 @@ msgstr ""
 msgctxt "#33040"
 msgid "Run video images cache tool"
 msgstr "Run video images cache tool"
+
+msgctxt "#33041"
+msgid "Check unsuccessfully scraped movies/tvshows"
+msgstr "Check unsuccessfully scraped movies/tvshows"

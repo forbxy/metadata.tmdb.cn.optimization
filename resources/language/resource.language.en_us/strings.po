@@ -197,4 +197,8 @@ msgctxt "#33021"
 msgid "Skip BDMV Folder"
 msgstr "Skip BDMV Folder"
 
+msgctxt "#33041"
+msgid "Check unsuccessfully scraped movies/tvshows"
+msgstr "Check unsuccessfully scraped movies/tvshows"
+
 

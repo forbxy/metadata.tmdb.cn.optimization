@@ -208,3 +208,7 @@ msgstr "跳过包含 BDMV 的原盘文件夹"
 msgctxt "#33040"
 msgid "Run video images cache tool"
 msgstr "运行电影图片缓存工具"
+
+msgctxt "#33041"
+msgid "Check unsuccessfully scraped movies/tvshows"
+msgstr "检查未成功刮削电影/电视剧"

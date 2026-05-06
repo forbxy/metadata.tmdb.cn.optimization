@@ -17,6 +17,7 @@ from scraper_datahelper import combine_scraped_details_info_and_ratings, \
     combine_scraped_details_available_artwork, find_uniqueids_in_text, get_params
 from scraper_config import configure_scraped_details, PathSpecificSettings, \
     configure_tmdb_artwork, is_fanarttv_configured
+from title_search_optimizer import build_search_title_candidates
 
 ADDON_SETTINGS = xbmcaddon.Addon()
 ID = ADDON_SETTINGS.getAddonInfo('id')
@@ -46,17 +47,21 @@ def get_dns_settings(settings):
 
 def search_for_movie(title, year, handle, settings):
     log("Find movie with title '{title}' from year '{year}'".format(title=title, year=year), xbmc.LOGINFO)
-    title = _strip_trailing_article(title)
     scraper = get_tmdb_scraper(settings)
 
-    search_results = scraper.search(title, year)
-    if year is not None:
-        if not search_results:
-            search_results = scraper.search(title,str(int(year)-1))
-        if not search_results:
-            search_results = scraper.search(title,str(int(year)+1))
-        if not search_results:
-            search_results = scraper.search(title)
+    search_results = []
+    for candidate in build_search_title_candidates(title):
+        candidate_title = _strip_trailing_article(candidate)
+        search_results = _search_with_year_fallback(scraper, candidate_title, year)
+
+        if isinstance(search_results, dict) and 'error' in search_results:
+            break
+
+        if search_results:
+            if candidate != title:
+                log("Search matched optimized title candidate '{title}'".format(title=candidate), xbmc.LOGDEBUG)
+            break
+
     if not search_results:
         return
 
@@ -98,6 +103,18 @@ def _searchresult_to_listitem(movie):
         listitem.setArt({'thumb': movie['poster_path']})
 
     return listitem
+
+
+def _search_with_year_fallback(scraper, title, year):
+    search_results = scraper.search(title, year)
+    if year is not None:
+        if not search_results:
+            search_results = scraper.search(title, str(int(year) - 1))
+        if not search_results:
+            search_results = scraper.search(title, str(int(year) + 1))
+        if not search_results:
+            search_results = scraper.search(title)
+    return search_results
 
 # Default limit of 10 because a big list of artwork can cause trouble in some cases
 # (a column can be too large for the MySQL integration),

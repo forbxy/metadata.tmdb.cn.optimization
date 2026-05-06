@@ -448,6 +448,12 @@
 						<data>RunScript(metadata.tmdb.cn.optimization, ?action=cache_images)</data>
 					</control>
 				</setting>
+				<setting id="check_unscraped_media_tool" type="action" label="33041" option="close">
+					<level>0</level>
+					<control type="button" format="action">
+						<data>RunScript(metadata.tmdb.cn.optimization, ?action=check_unscraped_media)</data>
+					</control>
+				</setting>
 			</group>
 		</category>
 		<category id="proxy_custom" label="32005">
