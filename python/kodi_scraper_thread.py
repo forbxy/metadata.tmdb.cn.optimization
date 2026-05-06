@@ -3,6 +3,7 @@ import os
 import urllib.parse
 import json
 import time
+from difflib import SequenceMatcher
 import xbmc
 import xbmcvfs
 import xbmcgui
@@ -45,13 +46,132 @@ def _is_documentary(item):
     return False
 
 
+def _normalize_match_text(value):
+    text = (value or '').lower()
+    # Keep CJK, letters and digits; remove separators/noise for stable similarity.
+    text = re.sub(r'[^\w\u4e00-\u9fff]+', ' ', text)
+    return re.sub(r'\s+', ' ', text).strip()
+
+
+def _iter_match_candidate_values(value):
+    if isinstance(value, (list, tuple, set)):
+        for entry in value:
+            for nested in _iter_match_candidate_values(entry):
+                yield nested
+        return
+
+    if isinstance(value, dict):
+        direct_title = (
+            value.get('title')
+            or value.get('name')
+            or value.get('original_title')
+            or value.get('original_name')
+            or ''
+        )
+        if direct_title:
+            yield direct_title
+
+        nested_candidates = value.get('titles') or value.get('results') or []
+        for nested in _iter_match_candidate_values(nested_candidates):
+            yield nested
+        return
+
+    if value:
+        yield value
+
+
+def _score_result_match(item, search_title, search_year):
+    query = _normalize_match_text(search_title)
+    if not query:
+        return {
+            'score': -999.0,
+            'similarity': 0.0,
+            'contains': False,
+            'exact': False,
+            'year_ok': False,
+        }
+
+    candidate_fields = [
+        item.get('title', ''),
+        item.get('original_title', ''),
+        item.get('name', ''),
+        item.get('original_name', ''),
+        item.get('english_title', ''),
+        item.get('english_original_title', ''),
+        item.get('title_en', ''),
+        item.get('original_title_en', ''),
+        item.get('english_name', ''),
+        item.get('english_alias_titles', []),
+        item.get('alias_titles', []),
+        item.get('aliases', []),
+        item.get('alternative_titles', []),
+    ]
+
+    best_similarity = 0.0
+    contains = False
+    exact = False
+
+    for field in candidate_fields:
+        for value in _iter_match_candidate_values(field):
+            candidate = _normalize_match_text(value)
+            if not candidate:
+                continue
+
+            if candidate == query:
+                exact = True
+
+            if len(query) >= 3 and (query in candidate or candidate in query):
+                contains = True
+
+            similarity = SequenceMatcher(None, query, candidate).ratio()
+            if similarity > best_similarity:
+                best_similarity = similarity
+
+    release_date = item.get('release_date', '') or item.get('first_air_date', '') or ''
+    year_ok = (not search_year) or release_date.startswith(str(search_year))
+
+    score = best_similarity * 100.0
+    if exact:
+        score += 50.0
+    if contains:
+        score += 35.0
+    if year_ok:
+        score += 20.0
+    else:
+        score -= 20.0
+
+    # Keep popularity as a weak tie-breaker only.
+    try:
+        score += min(float(item.get('popularity', 0.0)), 100.0) / 20.0
+    except Exception:
+        pass
+
+    return {
+        'score': score,
+        'similarity': best_similarity,
+        'contains': contains,
+        'exact': exact,
+        'year_ok': year_ok,
+    }
+
+
 def _select_best_match(results, title, year):
     """Select the best match from TMDB search results, avoiding documentaries
     when there are better alternatives and the user isn't searching for one."""
     if not results:
         return None
     if len(results) == 1:
-        return results[0]
+        single = results[0]
+        single_meta = _score_result_match(single, title, year)
+        if not single_meta['exact'] and not single_meta['contains'] and single_meta['similarity'] < 0.45:
+            log(
+                f"No confident traditional match for '{title}' ({year}). "
+                f"Only candidate '{single.get('title')}' [TMDB={single.get('id')}] "
+                f"similarity={single_meta['similarity']:.2f}",
+                xbmc.LOGWARNING,
+            )
+            return None
+        return single
 
     # If the search title itself suggests a documentary, don't filter
     search_looks_doc = _is_documentary({'title': title})
@@ -66,12 +186,23 @@ def _select_best_match(results, title, year):
     # Prefer non-documentary results
     candidates = non_docs if non_docs else docs
 
-    # Among candidates, prefer ones whose title is contained in the search title
-    search_lower = title.lower()
-    title_matches = [r for r in candidates
-                     if (r.get('title') or '').lower() in search_lower
-                     or search_lower in (r.get('title') or '').lower()]
-    best = title_matches[0] if title_matches else candidates[0]
+    scored = []
+    for r in candidates:
+        meta = _score_result_match(r, title, year)
+        scored.append((meta['score'], meta, r))
+
+    scored.sort(key=lambda entry: entry[0], reverse=True)
+    _, best_meta, best = scored[0]
+
+    # Avoid high-risk false positives when no lexical evidence exists.
+    if not best_meta['exact'] and not best_meta['contains'] and best_meta['similarity'] < 0.45:
+        log(
+            f"No confident traditional match for '{title}' ({year}). "
+            f"Top candidate '{best.get('title')}' [TMDB={best.get('id')}] "
+            f"similarity={best_meta['similarity']:.2f}",
+            xbmc.LOGWARNING,
+        )
+        return None
 
     if docs and best in non_docs:
         skipped = docs[0]
@@ -1511,15 +1642,22 @@ class KodiScraperSimulation:
                     except Exception as e:
                         log(f"GetDetails(NFO) Error: {e}", xbmc.LOGERROR)
 
-            # unique_id = None
-            # 2. Filename ID
+            # 2. Filename ID (temporarily disabled for filename-search evaluation)
+            skip_filename_uniqueid_lookup = False
             if not details and unique_id:
                 id_type, id_val = unique_id
-                log(f"ID found in filename: {id_type}={id_val}. Attempting direct details lookup.", xbmc.LOGINFO)
-                try:
-                    details = runner.get_details({id_type: id_val})
-                except Exception as e:
-                    log(f"GetDetails(Direct) Error: {e}", xbmc.LOGERROR)
+                if skip_filename_uniqueid_lookup:
+                    log(
+                        f"ID found in filename: {id_type}={id_val}. Direct details lookup skipped (temporary).",
+                        xbmc.LOGINFO,
+                    )
+                    search_history.append(f"唯一ID已跳过: {id_type}={id_val}")
+                else:
+                    log(f"ID found in filename: {id_type}={id_val}. Attempting direct details lookup.", xbmc.LOGINFO)
+                    try:
+                        details = runner.get_details({id_type: id_val})
+                    except Exception as e:
+                        log(f"GetDetails(Direct) Error: {e}", xbmc.LOGERROR)
 
             # 3. Search
             if not details:
@@ -1532,7 +1670,7 @@ class KodiScraperSimulation:
                     # 3.1 Direct Search (Traditional)
                     if not deepseek_extractor or only_on_failure:
                         # If deepseek is off, OR it's enabled but we only use it on failure
-                        results, traditional_history = runner.search_with_history(title, year)
+                        results, traditional_history, traditional_query_title = runner.search_with_history(title, year)
                         if traditional_history:
                             for h in traditional_history:
                                 search_history.append(f"搜索(传统): {h}")
@@ -1542,10 +1680,14 @@ class KodiScraperSimulation:
 
                         if results:
                             # Traditional search success
-                            match = _select_best_match(results, title, year)
-                            log(f"Match found (Traditional): {match.get('title')} ({match.get('release_date', '')}) [TMDB={match.get('id')}]", xbmc.LOGINFO)
-                            unique_ids = {'tmdb': str(match.get('id'))}
-                            details = runner.get_details(unique_ids)
+                            score_title = traditional_query_title or title
+                            match = _select_best_match(results, score_title, year)
+                            if match:
+                                log(f"Match found (Traditional): {match.get('title')} ({match.get('release_date', '')}) [TMDB={match.get('id')}]", xbmc.LOGINFO)
+                                unique_ids = {'tmdb': str(match.get('id'))}
+                                details = runner.get_details(unique_ids)
+                            else:
+                                log(f"Traditional search returned results but no confident match for '{score_title}' ({year})", xbmc.LOGWARNING)
 
                     # 3.2 DeepSeek Search (If needed)
                     # Condition: DeepSeek is enabled AND (it's not 'only_on_failure' OR previous search failed)
@@ -1562,39 +1704,50 @@ class KodiScraperSimulation:
                         # Use DeepSeek info if available
                         search_title = ds_title
                         search_year = ds_year
+                        score_title = search_title
                         if ds_title:
-                            results, deepseek_history = runner.search_with_history(search_title, search_year)
+                            results, deepseek_history, deepseek_query_title = runner.search_with_history(search_title, search_year)
                             if deepseek_history:
                                 for h in deepseek_history:
                                     search_history.append(f"搜索(DeepSeek): {h}")
                             else:
                                 search_history.append(f"搜索(DeepSeek): {search_title} ({search_year})")
                             log(f"DeepSeek search '{search_title}' ({search_year}) returned {len(results) if results else 0} results", xbmc.LOGINFO)
+                            score_title = deepseek_query_title or search_title
 
                         # Fallback to English title if primary search failed
                         if not results and ds_english and ds_english != search_title:
                             log(f"No results for DeepSeek Chinese title. Trying DeepSeek English title: {ds_english}", xbmc.LOGINFO)
-                            results, deepseek_en_history = runner.search_with_history(ds_english, search_year)
+                            results, deepseek_en_history, deepseek_en_query_title = runner.search_with_history(ds_english, search_year)
                             if deepseek_en_history:
                                 for h in deepseek_en_history:
                                     search_history.append(f"搜索(DeepSeek英文): {h}")
                             else:
                                 search_history.append(f"搜索(DeepSeek英文): {ds_english} ({search_year})")
                             log(f"DeepSeek English search '{ds_english}' ({search_year}) returned {len(results) if results else 0} results", xbmc.LOGINFO)
+                            score_title = deepseek_en_query_title or ds_english
 
                         if not ds_title and not ds_english:
                             search_history.append("搜索(DeepSeek): 未提取到可用标题")
 
                         if results:
-                            match = _select_best_match(results, search_title, search_year)
-                            log(f"Match found (DeepSeek): {match.get('title')} ({match.get('release_date', '')}) [TMDB={match.get('id')}]", xbmc.LOGINFO)
-                            unique_ids = {'tmdb': str(match.get('id'))}
-                            details = runner.get_details(unique_ids)
+                            match = _select_best_match(results, score_title, search_year)
+                            if match:
+                                log(f"Match found (DeepSeek): {match.get('title')} ({match.get('release_date', '')}) [TMDB={match.get('id')}]", xbmc.LOGINFO)
+                                unique_ids = {'tmdb': str(match.get('id'))}
+                                details = runner.get_details(unique_ids)
+                            else:
+                                log(f"DeepSeek search returned results but no confident match for '{score_title}' ({search_year})", xbmc.LOGWARNING)
                         else:
                             log(f"No results found via DeepSeek for {search_title}", xbmc.LOGWARNING)
 
                 except Exception as e:
+                    tb = traceback.format_exc()
                     log(f"Search Error: {e}", xbmc.LOGERROR)
+                    log(f"Search Traceback:\n{tb}", xbmc.LOGERROR)
+                    search_history.append(f"搜索异常: {e}")
+                    for line in tb.strip().splitlines():
+                        search_history.append(f"搜索异常堆栈: {line}")
 
             if not details or "error" in details:
                 # log(f"Failed to get details for {title} {year} {unique_id} {english_title_from_deepseek} {file_path}", xbmc.LOGERROR)
@@ -1778,7 +1931,7 @@ class KodiScraperSimulation:
                 
                 # Check scraped
                 if self.is_video_scraped(full_path):
-                    log(f"Already scraped, skipping: {full_path}", xbmc.LOGINFO)
+                    log(f"Already scraped, skipping: {full_path}", xbmc.LOGDEBUG)
                     self.deal_process += item_weight_process
                     if self.pDialog:
                         self.pDialog.update(int(self.deal_process * 100))
@@ -2091,8 +2244,10 @@ class KodiScraperSimulation:
                 for d in sorted(failed_map.keys()):
                     log(f"  目录: {d}", xbmc.LOGINFO)
                     for f_name, hist in sorted(failed_map[d], key=lambda x: x[0]):
-                        hist_str = " | ".join(hist) if hist else ""
-                        log(f"    失败: {f_name}  {hist_str}", xbmc.LOGINFO)
+                        log(f"    失败: {f_name}", xbmc.LOGINFO)
+                        if hist:
+                            for h in hist:
+                                log(f"      - {h}", xbmc.LOGINFO)
 
                 xbmcgui.Dialog().textviewer("刮削失败列表 (按目录)", failed_msg)
 

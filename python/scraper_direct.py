@@ -57,12 +57,12 @@ class ScraperRunner(object):
         Run search and return raw list of dicts.
         Matches logic in scraper.py search_for_movie (strips articles, fallbacks for year)
         """
-        search_results, _ = self.search_with_history(title, year)
+        search_results, _, _ = self.search_with_history(title, year)
         return search_results
 
     def search_with_history(self, title, year=None):
         """
-        Run search and return (results, history).
+        Run search and return (results, history, matched_query_title).
         History includes every candidate and year-fallback query actually executed.
         """
         history = []
@@ -94,12 +94,12 @@ class ScraperRunner(object):
                     )
 
             if isinstance(search_results, dict) and 'error' in search_results:
-                return search_results, history
+                return search_results, history, candidate_title
 
             if search_results:
-                return search_results, history
+                return search_results, history, candidate_title
 
-        return [], history
+        return [], history, None
 
     def _search_with_year_fallback(self, title, year):
         search_results, _ = self._search_with_year_fallback_with_history(title, year)

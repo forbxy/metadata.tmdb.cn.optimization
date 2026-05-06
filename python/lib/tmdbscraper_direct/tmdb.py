@@ -1,4 +1,6 @@
 from datetime import datetime, timedelta
+from difflib import SequenceMatcher
+import re
 from . import tmdbapi
 from . import api_utils
 from . import pinyin
@@ -16,6 +18,7 @@ class TMDBMovieScraper(object):
             self.search_language = search_language
         self.include_adult = include_adult
         self._urls = None
+        self._english_title_cache = {}
 
     @property
     def urls(self):
@@ -36,21 +39,6 @@ class TMDBMovieScraper(object):
             return 'https://wsrv.nl/?url='
 
     def search(self, title, year=None):
-
-        def is_best(item):
-            item_title = item['title'].lower()
-            search_title = title.lower()
-            year_ok = not year or item.get('release_date', '').startswith(str(year))
-            if not year_ok:
-                return False
-            if item_title == search_title:
-                return True
-            # Substring match: clean title is often embedded in a noisy search query
-            if len(item_title) >= 3 and len(search_title) >= 3:
-                if item_title in search_title or search_title in item_title:
-                    return True
-            return False
-
         search_media_id = _parse_media_id(title)
         if search_media_id:
             if search_media_id['type'] == 'tmdb':
@@ -68,9 +56,13 @@ class TMDBMovieScraper(object):
             if 'error' in response:
                 return response
             result = response['results']
-            # get second page if available and if first page doesn't contain an `is_best` result with popularity > 5
+            # Get second page when first page has no strong lexical match.
             if response['total_pages'] > 1:
-                bests = [item for item in result if is_best(item) and item.get('popularity',0) > 5]
+                bests = [
+                    item
+                    for item in result
+                    if _is_confident_match(_score_search_match(item, title, year)) and item.get('popularity', 0) > 5
+                ]
                 if not bests:
                     response = tmdbapi.search_movie(query=title, year=year, language=self.language, page=2, settings=self.url_settings, include_adult=self.include_adult)
                     if not 'error' in response:
@@ -78,9 +70,18 @@ class TMDBMovieScraper(object):
         urls = self.urls
 
         if result:
-            # move all `is_best` results at the beginning of the list, sort them by popularity (if found):
-            bests_first = sorted([item for item in result if is_best(item)], key=lambda k: k.get('popularity',0), reverse=True)
-            result = bests_first + [item for item in result if item not in bests_first]
+            result, has_confident = self._sort_results_by_match(result, title, year)
+
+            # When all candidates are low-confidence, enrich with aliases and
+            # localized/English titles from details for a second lexical pass.
+            if not has_confident:
+                enrich_limit = 8 if _query_looks_english(title) else 3
+                self._enrich_results_with_english_titles(result, limit=enrich_limit)
+                result, has_confident = self._sort_results_by_match(result, title, year)
+
+            # Avoid high-risk false positives in unattended scan for pure English queries.
+            if not has_confident and _query_looks_english(title):
+                return []
 
         proxy = self._get_image_proxy()
 
@@ -90,6 +91,85 @@ class TMDBMovieScraper(object):
             if item.get('backdrop_path'):
                 item['backdrop_path'] = proxy + urls['preview'] + item['backdrop_path']
         return result
+
+    def _sort_results_by_match(self, items, search_title, search_year):
+        scored = []
+        for item in items:
+            meta = _score_search_match(item, search_title, search_year)
+            popularity = item.get('popularity', 0) or 0
+            scored.append((meta['score'], popularity, item, meta))
+
+        scored.sort(key=lambda entry: (entry[0], entry[1]), reverse=True)
+        sorted_items = [entry[2] for entry in scored]
+        has_confident = any(_is_confident_match(entry[3]) for entry in scored)
+        return sorted_items, has_confident
+
+    def _enrich_results_with_english_titles(self, items, limit=8):
+        for item in items[:limit]:
+            movie_id = item.get('id')
+            if not movie_id:
+                continue
+
+            cached = self._english_title_cache.get(movie_id)
+            if cached is None:
+                cached = {'title': '', 'original_title': '', 'aliases': []}
+                try:
+                    english_movie = tmdbapi.get_movie(
+                        movie_id,
+                        language='en-US',
+                        append_to_response='alternative_titles',
+                        settings=self.url_settings,
+                    )
+                    if isinstance(english_movie, dict) and 'error' not in english_movie:
+                        cached['title'] = english_movie.get('title', '') or ''
+                        cached['original_title'] = english_movie.get('original_title', '') or ''
+
+                        aliases = []
+                        alt_payload = english_movie.get('alternative_titles') or {}
+                        alt_items = []
+                        if isinstance(alt_payload, dict):
+                            alt_items = alt_payload.get('titles') or alt_payload.get('results') or []
+                        elif isinstance(alt_payload, list):
+                            alt_items = alt_payload
+
+                        for alt in alt_items:
+                            if isinstance(alt, dict):
+                                alias = (alt.get('title') or alt.get('name') or '').strip()
+                            else:
+                                alias = str(alt).strip()
+
+                            if alias and alias not in aliases:
+                                aliases.append(alias)
+
+                        also_known_as = english_movie.get('also_known_as') or []
+                        if isinstance(also_known_as, list):
+                            for alias in also_known_as:
+                                alias_text = str(alias).strip()
+                                if alias_text and alias_text not in aliases:
+                                    aliases.append(alias_text)
+
+                        cached['aliases'] = aliases
+                except Exception:
+                    pass
+                self._english_title_cache[movie_id] = cached
+
+            if cached.get('title'):
+                item['english_title'] = cached['title']
+            if cached.get('original_title'):
+                item['english_original_title'] = cached['original_title']
+            if cached.get('aliases'):
+                aliases = list(cached['aliases'])
+                item['english_alias_titles'] = aliases
+                merged_aliases = []
+                existing_aliases = item.get('alias_titles') or []
+                if not isinstance(existing_aliases, (list, tuple, set)):
+                    existing_aliases = [existing_aliases]
+                for alias in list(existing_aliases) + aliases:
+                    alias_text = str(alias).strip()
+                    if alias_text and alias_text not in merged_aliases:
+                        merged_aliases.append(alias_text)
+                if merged_aliases:
+                    item['alias_titles'] = merged_aliases
 
     def get_details(self, uniqueids):
         media_id = uniqueids.get('tmdb')
@@ -229,6 +309,121 @@ def _parse_media_id(title):
     elif title.startswith('imdb/tt') and title[7:].isdigit(): # IMDB ID with prefix to match
         return {'type': 'imdb', 'id':title[5:]}
     return None
+
+
+def _query_looks_english(title):
+    return bool(re.search(r'[a-zA-Z]', title or ''))
+
+
+def _normalize_match_text(value):
+    text = (value or '').lower()
+    text = re.sub(r'[^\w\u4e00-\u9fff]+', ' ', text)
+    return re.sub(r'\s+', ' ', text).strip()
+
+
+def _iter_match_candidates(item):
+    keys = (
+        'title', 'original_title', 'name', 'original_name',
+        'english_title', 'english_original_title',
+        'title_en', 'original_title_en', 'english_name',
+        'english_alias_titles', 'alias_titles', 'aliases', 'alternative_titles',
+    )
+    for key in keys:
+        value = item.get(key, '')
+        for entry in _iter_match_candidate_values(value):
+            yield entry
+
+
+def _iter_match_candidate_values(value):
+    if isinstance(value, (list, tuple, set)):
+        for entry in value:
+            for nested in _iter_match_candidate_values(entry):
+                yield nested
+        return
+
+    if isinstance(value, dict):
+        direct_title = (
+            value.get('title')
+            or value.get('name')
+            or value.get('original_title')
+            or value.get('original_name')
+            or ''
+        )
+        if direct_title:
+            yield direct_title
+
+        nested_candidates = value.get('titles') or value.get('results') or []
+        for nested in _iter_match_candidate_values(nested_candidates):
+            yield nested
+        return
+
+    if value:
+        yield value
+
+
+def _score_search_match(item, search_title, search_year):
+    query = _normalize_match_text(search_title)
+    if not query:
+        return {
+            'score': -999.0,
+            'similarity': 0.0,
+            'contains': False,
+            'exact': False,
+            'year_ok': False,
+        }
+
+    best_similarity = 0.0
+    contains = False
+    exact = False
+
+    for candidate_raw in _iter_match_candidates(item):
+        candidate = _normalize_match_text(candidate_raw)
+        if not candidate:
+            continue
+
+        if candidate == query:
+            exact = True
+
+        if len(query) >= 3 and (query in candidate or candidate in query):
+            contains = True
+
+        similarity = SequenceMatcher(None, query, candidate).ratio()
+        if similarity > best_similarity:
+            best_similarity = similarity
+
+    release_date = item.get('release_date', '') or item.get('first_air_date', '') or ''
+    year_ok = (not search_year) or release_date.startswith(str(search_year))
+
+    score = best_similarity * 100.0
+    if exact:
+        score += 50.0
+    if contains:
+        score += 35.0
+    if year_ok:
+        score += 20.0
+    else:
+        score -= 20.0
+
+    try:
+        score += min(float(item.get('popularity', 0.0)), 100.0) / 20.0
+    except Exception:
+        pass
+
+    return {
+        'score': score,
+        'similarity': best_similarity,
+        'contains': contains,
+        'exact': exact,
+        'year_ok': year_ok,
+    }
+
+
+def _is_confident_match(meta):
+    if meta['exact']:
+        return True
+    if meta['contains'] and meta['year_ok']:
+        return True
+    return meta['similarity'] >= 0.72 and meta['year_ok']
 
 def _get_movie(mid, language=None, search=False):
     details = None if search else \
