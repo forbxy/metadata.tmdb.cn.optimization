@@ -1,6 +1,9 @@
 from datetime import datetime, timedelta
 from difflib import SequenceMatcher
 import re
+from urllib.parse import quote
+import json
+import requests
 from . import tmdbapi
 from . import api_utils
 
@@ -407,7 +410,7 @@ class TMDBMovieScraper(object):
                     info['mpaa'] = country['certification']
                     break
 
-        trailer = _parse_trailer(movie.get('trailers', {}), movie_fallback.get('trailers', {}))
+        trailer = _fetch_maoyan_trailer(movie['title'], movie.get('release_date', ''))
         if trailer:
             info['trailer'] = trailer
         if collection:
@@ -656,11 +659,79 @@ def _load_base_urls(url_settings):
             url_settings.setSetting('lastUpdated', str(_get_date_numeric(datetime.now())))
     return urls
 
-def _parse_trailer(trailers, fallback):
-    if trailers.get('youtube'):
-        return 'plugin://plugin.video.youtube/play/?video_id='+trailers['youtube'][0]['source']
-    if fallback.get('youtube'):
-        return 'plugin://plugin.video.youtube/play/?video_id='+fallback['youtube'][0]['source']
+_MAOYAN_HEADERS = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'Accept': 'application/json, text/plain, */*',
+    'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+}
+
+def _search_maoyan_movie_id(keyword, year):
+    resp = requests.get(
+        'https://apis.netstart.cn/maoyan/search/movies?keyword={}&ci=1'.format(quote(keyword)),
+        timeout=10, headers=_MAOYAN_HEADERS)
+    if resp.status_code != 200:
+        return None
+    data = resp.json()
+    if not data or not isinstance(data, list) or len(data) == 0:
+        return None
+
+    if len(data) == 1:
+        return data[0].get('id')
+
+    if year:
+        by_year = [item for item in data
+                   if (item.get('release') or '').startswith(year)]
+        if len(by_year) == 1:
+            return by_year[0].get('id')
+
+        keyword2 = '{} ({})'.format(keyword, year)
+        resp2 = requests.get(
+            'https://apis.netstart.cn/maoyan/search/movies?keyword={}&ci=1'.format(quote(keyword2)),
+            timeout=10, headers=_MAOYAN_HEADERS)
+        if resp2.status_code == 200:
+            data2 = resp2.json()
+            if data2 and isinstance(data2, list) and len(data2) > 0:
+                return data2[0].get('id')
+
+        return data[0].get('id')
+
+    return data[0].get('id')
+
+
+def _fetch_maoyan_trailer(title, release_date):
+    year = ''
+    if release_date:
+        year = release_date[:4]
+    try:
+        movie_id = None
+
+        prefix = re.split(r'[：\-]', title)[0].strip()
+        if prefix != title:
+            movie_id = _search_maoyan_movie_id(prefix, year)
+            if movie_id:
+                detail_url = 'https://apis.netstart.cn/maoyan/movie/detail?movieId={}'.format(movie_id)
+                resp = requests.get(detail_url, timeout=10, headers=_MAOYAN_HEADERS)
+                if resp.status_code == 200:
+                    matches = re.findall(r'https?://vod\.pipi\.cn/[^\s"\']+\.mp4', resp.text)
+                    if matches:
+                        return matches[0]
+
+        movie_id = _search_maoyan_movie_id(title, year)
+        if not movie_id:
+            return None
+
+        detail_url = 'https://apis.netstart.cn/maoyan/movie/detail?movieId={}'.format(movie_id)
+        resp = requests.get(detail_url, timeout=10, headers=_MAOYAN_HEADERS)
+        if resp.status_code != 200:
+            return None
+        matches = re.findall(r'https?://vod\.pipi\.cn/[^\s"\']+\.mp4', resp.text)
+        if matches:
+            return matches[0]
+    except Exception as e:
+        try:
+            tmdbapi.log(f'maoyan trailer failed for "{title}" ({year}): {e}')
+        except Exception:
+            pass
     return None
 
 def _get_names(items):
