@@ -49,8 +49,10 @@ def _configure_keeporiginaltitle(details, settings):
     return details
 
 def _configure_trailer(details, settings):
-    if details['info'].get('trailer') and not settings.getSettingBool('trailer'):
-        del details['info']['trailer']
+    trailer_url = details['info'].get('trailer', '')
+    if not settings.getSettingBool('trailer'):
+        if 'youtube.com' in trailer_url or 'youtu.be' in trailer_url:
+            del details['info']['trailer']
     return details
 
 def _configure_multiple_studios(details, settings):
