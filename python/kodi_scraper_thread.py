@@ -25,7 +25,6 @@ if script_dir not in sys.path:
 
 from scraper_direct import ScraperRunner
 from lib.tmdbscraper_direct import dns_override
-from lib.tmdbscraper_direct.tmdb import _fetch_maoyan_trailer
 
 
 def log(message, level=xbmc.LOGDEBUG):
@@ -2037,73 +2036,6 @@ class KodiScraperSimulation:
         
         dns_override.set_custom_hosts(custom_ips)
 
-    def backfill_maoyan_trailers(self):
-        log("Checking for movies with missing maoyan trailers...", xbmc.LOGINFO)
-
-        addon_version = ADDON_SETTINGS.getAddonInfo('version')
-        last_version = ADDON_SETTINGS.getSetting('trailer_backfill_version')
-        if last_version == addon_version:
-            log(f"Trailer backfill already done for version {addon_version}, skipping.", xbmc.LOGDEBUG)
-            return
-
-        if not self.db or not self.db.conn:
-            log("DB not connected, cannot backfill trailers.", xbmc.LOGWARNING)
-            return
-
-        try:
-            cur = self.db.cursor()
-            cur.execute("""
-                SELECT m.idMovie, m.c00, m.premiered
-                FROM movie m
-                JOIN uniqueid u ON u.media_id = m.idMovie
-                    AND u.media_type = 'movie' AND u.type = 'tmdb'
-                WHERE (m.c19 IS NULL OR m.c19 = '' OR m.c19 LIKE '%youtube.com%' OR m.c19 LIKE '%youtu.be%')
-                    AND m.c00 IS NOT NULL AND m.c00 != ''
-                    AND m.premiered IS NOT NULL AND m.premiered != ''
-            """)
-            rows = cur.fetchall()
-            if not rows:
-                log("No movies found with missing trailers.", xbmc.LOGINFO)
-                ADDON_SETTINGS.setSetting('trailer_backfill_version', addon_version)
-                return
-
-            log(f"Found {len(rows)} movie(s) with missing trailers. Backfilling...", xbmc.LOGINFO)
-
-            filled = 0
-            failed = 0
-            for row in rows:
-                id_movie = row[0] if not self.db.is_mysql else row['idMovie']
-                title = row[1] if not self.db.is_mysql else row['c00']
-                premiered = row[2] if not self.db.is_mysql else row['premiered']
-
-                trailer = _fetch_maoyan_trailer(title, premiered)
-                if trailer:
-                    try:
-                        cur.execute("UPDATE movie SET c19=? WHERE idMovie=?", (trailer, id_movie))
-                        self.db.conn.commit()
-                        filled += 1
-                        log(f"Backfilled trailer for '{title}' ({premiered[:4]})", xbmc.LOGINFO)
-                    except Exception as e:
-                        log(f"DB update failed for '{title}': {e}", xbmc.LOGERROR)
-                        failed += 1
-                else:
-                    log(f"No trailer found for '{title}' ({premiered[:4]})", xbmc.LOGDEBUG)
-                    failed += 1
-
-            ADDON_SETTINGS.setSetting('trailer_backfill_version', addon_version)
-            log(f"Trailer backfill complete: {filled} filled, {failed} not found/error.", xbmc.LOGINFO)
-
-            if filled > 0:
-                xbmcgui.Dialog().notification(
-                    "TMDB CN Optimization",
-                    f"已补充 {filled} 个猫眼预告片",
-                    xbmcgui.NOTIFICATION_INFO,
-                    4000,
-                )
-
-        except Exception as e:
-            log(f"Trailer backfill error: {e}", xbmc.LOGERROR)
-
     def scan_and_process(self):
         """
         Main entry point.
@@ -2191,9 +2123,7 @@ class KodiScraperSimulation:
                 self.load_path_cache()
             
             self.load_scraped_files()
-
-            self.backfill_maoyan_trailers()
-
+            
             # Get start points
             paths = self.get_scraper_roots()
             if not paths:

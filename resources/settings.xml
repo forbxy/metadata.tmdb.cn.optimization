@@ -552,11 +552,6 @@
 						<heading>32004</heading>
 					</control>
 				</setting>
-				<setting id="trailer_backfill_version" type="string" label="" help="">
-					<visible>false</visible>
-					<level>0</level>
-					<default/>
-				</setting>
 			</group>
 		</category>
 	</section>
