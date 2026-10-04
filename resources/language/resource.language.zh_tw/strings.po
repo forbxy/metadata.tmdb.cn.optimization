@@ -116,3 +116,55 @@ msgstr "Fanart.tv"
 #~ msgctxt "#30003"
 #~ msgid "Get Rating from"
 #~ msgstr "從...取得評價"
+
+msgctxt "#32011"
+msgid "Image resizing"
+msgstr "圖片縮放"
+
+msgctxt "#32012"
+msgid "Enable wsrv.nl image resizing"
+msgstr "啟用 wsrv.nl 圖片縮放"
+
+msgctxt "#32013"
+msgid "Poster maximum width (px)"
+msgstr "海報（poster）最大寬度（像素）"
+
+msgctxt "#32014"
+msgid "Keyart maximum width (px)"
+msgstr "無標題海報（keyart）最大寬度（像素）"
+
+msgctxt "#32015"
+msgid "Fanart maximum width (px)"
+msgstr "背景圖（fanart）最大寬度（像素）"
+
+msgctxt "#32016"
+msgid "Landscape maximum width (px)"
+msgstr "橫向藝術圖（landscape）最大寬度（像素）"
+
+msgctxt "#32017"
+msgid "Banner maximum width (px)"
+msgstr "橫幅（banner）最大寬度（像素）"
+
+msgctxt "#32018"
+msgid "Disc art maximum width (px)"
+msgstr "光碟圖（discart）最大寬度（像素）"
+
+msgctxt "#32019"
+msgid "Clear art maximum width (px)"
+msgstr "透明藝術圖（clearart）最大寬度（像素）"
+
+msgctxt "#32020"
+msgid "Clear logo maximum width (px)"
+msgstr "藝術標題（clearlogo）最大寬度（像素）"
+
+msgctxt "#32021"
+msgid "Cast and crew thumbnail maximum width (px)"
+msgstr "演職員頭像最大寬度（像素）"
+
+msgctxt "#32022"
+msgid "Only applies when the image proxy uses wsrv.nl. Resizes newly scraped images and previews; refresh existing library entries to update their URLs."
+msgstr "僅在圖片代理使用 wsrv.nl 時生效。縮放新刮削的圖片及預覽圖；已有媒體庫項目需重新整理後才能更新圖片位址。"
+
+msgctxt "#32023"
+msgid "Enter a positive integer in pixels, or leave empty to keep the original size. Preserves aspect ratio and never enlarges smaller images. Movie sets use the same limits."
+msgstr "填寫正整數（像素），留空表示不縮放。保持圖片比例，只縮小、不放大。電影集使用相同類型的寬度設定。"

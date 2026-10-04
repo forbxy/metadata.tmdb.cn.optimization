@@ -147,3 +147,55 @@ msgstr "Run video images cache tool"
 msgctxt "#33041"
 msgid "Check unsuccessfully scraped movies/tvshows"
 msgstr "Check unsuccessfully scraped movies/tvshows"
+
+msgctxt "#32011"
+msgid "Image resizing"
+msgstr ""
+
+msgctxt "#32012"
+msgid "Enable wsrv.nl image resizing"
+msgstr ""
+
+msgctxt "#32013"
+msgid "Poster maximum width (px)"
+msgstr ""
+
+msgctxt "#32014"
+msgid "Keyart maximum width (px)"
+msgstr ""
+
+msgctxt "#32015"
+msgid "Fanart maximum width (px)"
+msgstr ""
+
+msgctxt "#32016"
+msgid "Landscape maximum width (px)"
+msgstr ""
+
+msgctxt "#32017"
+msgid "Banner maximum width (px)"
+msgstr ""
+
+msgctxt "#32018"
+msgid "Disc art maximum width (px)"
+msgstr ""
+
+msgctxt "#32019"
+msgid "Clear art maximum width (px)"
+msgstr ""
+
+msgctxt "#32020"
+msgid "Clear logo maximum width (px)"
+msgstr ""
+
+msgctxt "#32021"
+msgid "Cast and crew thumbnail maximum width (px)"
+msgstr ""
+
+msgctxt "#32022"
+msgid "Only applies when the image proxy uses wsrv.nl. Resizes newly scraped images and previews; refresh existing library entries to update their URLs."
+msgstr ""
+
+msgctxt "#32023"
+msgid "Enter a positive integer in pixels, or leave empty to keep the original size. Preserves aspect ratio and never enlarges smaller images. Movie sets use the same limits."
+msgstr ""

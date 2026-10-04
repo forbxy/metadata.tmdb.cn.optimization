@@ -510,6 +510,150 @@
 				</setting>
 			</group>
 		</category>
+		<category id="image_resize" label="32011" help="32022">
+			<group id="1">
+				<setting id="enable_image_resize" type="boolean" label="32012" help="32022">
+					<level>0</level>
+					<default>false</default>
+					<control type="toggle"/>
+				</setting>
+				<setting id="image_max_width_poster" parent="enable_image_resize" type="string" label="32013" help="32023">
+					<level>0</level>
+					<default>480</default>
+					<constraints>
+						<allowempty>true</allowempty>
+					</constraints>
+					<dependencies>
+						<dependency type="visible">
+							<condition operator="is" setting="enable_image_resize">true</condition>
+						</dependency>
+					</dependencies>
+					<control type="edit" format="string">
+						<heading>32013</heading>
+					</control>
+				</setting>
+				<setting id="image_max_width_keyart" parent="enable_image_resize" type="string" label="32014" help="32023">
+					<level>0</level>
+					<default>480</default>
+					<constraints>
+						<allowempty>true</allowempty>
+					</constraints>
+					<dependencies>
+						<dependency type="visible">
+							<condition operator="is" setting="enable_image_resize">true</condition>
+						</dependency>
+					</dependencies>
+					<control type="edit" format="string">
+						<heading>32014</heading>
+					</control>
+				</setting>
+				<setting id="image_max_width_fanart" parent="enable_image_resize" type="string" label="32015" help="32023">
+					<level>0</level>
+					<default>720</default>
+					<constraints>
+						<allowempty>true</allowempty>
+					</constraints>
+					<dependencies>
+						<dependency type="visible">
+							<condition operator="is" setting="enable_image_resize">true</condition>
+						</dependency>
+					</dependencies>
+					<control type="edit" format="string">
+						<heading>32015</heading>
+					</control>
+				</setting>
+				<setting id="image_max_width_landscape" parent="enable_image_resize" type="string" label="32016" help="32023">
+					<level>0</level>
+					<default>720</default>
+					<constraints>
+						<allowempty>true</allowempty>
+					</constraints>
+					<dependencies>
+						<dependency type="visible">
+							<condition operator="is" setting="enable_image_resize">true</condition>
+						</dependency>
+					</dependencies>
+					<control type="edit" format="string">
+						<heading>32016</heading>
+					</control>
+				</setting>
+				<setting id="image_max_width_banner" parent="enable_image_resize" type="string" label="32017" help="32023">
+					<level>0</level>
+					<default>720</default>
+					<constraints>
+						<allowempty>true</allowempty>
+					</constraints>
+					<dependencies>
+						<dependency type="visible">
+							<condition operator="is" setting="enable_image_resize">true</condition>
+						</dependency>
+					</dependencies>
+					<control type="edit" format="string">
+						<heading>32017</heading>
+					</control>
+				</setting>
+				<setting id="image_max_width_discart" parent="enable_image_resize" type="string" label="32018" help="32023">
+					<level>0</level>
+					<default>480</default>
+					<constraints>
+						<allowempty>true</allowempty>
+					</constraints>
+					<dependencies>
+						<dependency type="visible">
+							<condition operator="is" setting="enable_image_resize">true</condition>
+						</dependency>
+					</dependencies>
+					<control type="edit" format="string">
+						<heading>32018</heading>
+					</control>
+				</setting>
+				<setting id="image_max_width_clearart" parent="enable_image_resize" type="string" label="32019" help="32023">
+					<level>0</level>
+					<default></default>
+					<constraints>
+						<allowempty>true</allowempty>
+					</constraints>
+					<dependencies>
+						<dependency type="visible">
+							<condition operator="is" setting="enable_image_resize">true</condition>
+						</dependency>
+					</dependencies>
+					<control type="edit" format="string">
+						<heading>32019</heading>
+					</control>
+				</setting>
+				<setting id="image_max_width_clearlogo" parent="enable_image_resize" type="string" label="32020" help="32023">
+					<level>0</level>
+					<default></default>
+					<constraints>
+						<allowempty>true</allowempty>
+					</constraints>
+					<dependencies>
+						<dependency type="visible">
+							<condition operator="is" setting="enable_image_resize">true</condition>
+						</dependency>
+					</dependencies>
+					<control type="edit" format="string">
+						<heading>32020</heading>
+					</control>
+				</setting>
+				<setting id="image_max_width_thumb" parent="enable_image_resize" type="string" label="32021" help="32023">
+					<level>0</level>
+					<default>480</default>
+					<constraints>
+						<allowempty>true</allowempty>
+					</constraints>
+					<dependencies>
+						<dependency type="visible">
+							<condition operator="is" setting="enable_image_resize">true</condition>
+						</dependency>
+					</dependencies>
+					<control type="edit" format="string">
+						<heading>32021</heading>
+					</control>
+				</setting>
+			</group>
+		</category>
 		<category id="dns_custom" label="32000">
 			<group id="1">
 				<setting id="dns_tmdb_api" type="string" label="32001" help="">

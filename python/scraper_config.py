@@ -1,3 +1,9 @@
+try:
+    from .lib.image_resize import ImageResizer
+except ImportError:  # Kodi loads this module directly from the python directory.
+    from lib.image_resize import ImageResizer
+
+
 def configure_scraped_details(details, settings):
     details = _configure_rating_prefix(details, settings)
     details = _configure_keeporiginaltitle(details, settings)
@@ -5,7 +11,7 @@ def configure_scraped_details(details, settings):
     details = _configure_multiple_studios(details, settings)
     details = _configure_default_rating(details, settings)
     details = _configure_tags(details, settings)
-    return details
+    return ImageResizer(settings).configure_details(details)
 
 def configure_tmdb_artwork(details, settings):
     if 'available_art' not in details:

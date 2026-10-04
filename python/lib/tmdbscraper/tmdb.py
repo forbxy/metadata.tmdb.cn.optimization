@@ -3,6 +3,7 @@ from difflib import SequenceMatcher
 import re
 from . import tmdbapi
 from . import api_utils
+from ..image_resize import ImageResizer
 
 def get_pinyin_initials(text):
     if not text:
@@ -86,12 +87,13 @@ class TMDBMovieScraper(object):
                 return []
 
         proxy = self._get_image_proxy()
+        resizer = ImageResizer(self.url_settings)
 
         for item in result:
             if item.get('poster_path'):
-                item['poster_path'] = proxy + urls['preview'] + item['poster_path']
+                item['poster_path'] = resizer.resize(proxy + urls['preview'] + item['poster_path'], 'poster')
             if item.get('backdrop_path'):
-                item['backdrop_path'] = proxy + urls['preview'] + item['backdrop_path']
+                item['backdrop_path'] = resizer.resize(proxy + urls['preview'] + item['backdrop_path'], 'fanart')
         return result
 
     def _sort_results_by_match(self, items, search_title, search_year):
