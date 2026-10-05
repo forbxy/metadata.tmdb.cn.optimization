@@ -295,6 +295,7 @@ class KodiDatabase:
         self.mysql_config = mysql_config
         self.is_mysql = mysql_config is not None
         self.conn = None
+        self.video_version_item_type = None
         
     def connect(self):
         try:
@@ -316,8 +317,65 @@ class KodiDatabase:
             else:
                 self.conn = sqlite3.connect(self.db_path)
                 self.conn.row_factory = sqlite3.Row
+            self._load_video_version_item_type()
         except Exception as e:
             log(f"DB Connect Error: {e}", xbmc.LOGERROR)
+            self.close()
+            raise
+
+    def _load_video_version_item_type(self):
+        # Kodi 21 uses VERSION=0; Kodi 22 uses VERSION=1. The standard
+        # version type (40400) records the value required by this database.
+        cur = self.cursor()
+        if self.is_mysql:
+            cur.execute("SHOW TABLES LIKE 'videoversiontype'")
+        else:
+            cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='videoversiontype'")
+        if not cur.fetchone():
+            self.video_version_item_type = None  # Kodi 20 and earlier
+            return
+        cur.execute("SELECT itemType FROM videoversiontype WHERE id=?", (40400,))
+        row = cur.fetchone()
+        if row is None or row[0] not in (0, 1):
+            raise RuntimeError("Unsupported standard video version type in Kodi database")
+        self.video_version_item_type = row[0]
+
+    def repair_legacy_video_versions(self, path_cache):
+        """Repair this scraper's pre-fix VERSION=0 rows in a Kodi 22 library."""
+        if self.video_version_item_type != 1:
+            return 0
+        configured_paths = sorted(
+            ((path, cfg) for path, cfg in path_cache.items()
+             if cfg.get('scraper') or cfg.get('content')),
+            key=lambda entry: len(entry[0]), reverse=True,
+        )
+        cur = self.cursor()
+        cur.execute("""SELECT vv.idFile, vv.idType, vvt.name, p.strPath
+            FROM videoversion vv
+            JOIN movie m ON m.idMovie=vv.idMedia AND m.c00 IS NOT NULL AND m.c00<>''
+            JOIN files f ON f.idFile=vv.idFile
+            JOIN path p ON p.idPath=f.idPath
+            LEFT JOIN videoversiontype vvt ON vvt.id=vv.idType
+            WHERE vv.media_type='movie' AND vv.itemType=0""")
+        rows = cur.fetchall()
+        repaired = 0
+        try:
+            for row in rows:
+                path = row[3].replace('\\', '/').rstrip('/') + '/'
+                cfg = next((cfg for root, cfg in configured_paths if path.startswith(root)), {})
+                if cfg.get('scraper') != 'metadata.tmdb.cn.optimization' or cfg.get('content') != 'movies':
+                    continue
+                type_id = 40400 if row[1] == 40400 else self.get_video_version_type_id(row[2])
+                cur.execute("UPDATE videoversion SET itemType=?, idType=? WHERE idFile=?",
+                            (self.video_version_item_type, type_id, row[0]))
+                repaired += 1
+            self.conn.commit()
+        except Exception:
+            self.conn.rollback()
+            raise
+        if repaired:
+            log(f"Repaired {repaired} legacy video versions for Kodi 22.", xbmc.LOGINFO)
+        return repaired
 
     def close(self):
         if self.conn:
@@ -463,7 +521,8 @@ class KodiDatabase:
             # List of {idFile, name, idType}
             # Note: We use idType to know if it is a system default
             # Join with videoversiontype on id (PK of type table) = idType (FK in version table)
-            cur.execute("SELECT vv.idFile, vvt.name, vv.idType FROM videoversion vv LEFT JOIN videoversiontype vvt ON vv.idType = vvt.id WHERE vv.idMedia=? AND vv.media_type='movie'", (id_movie,))
+            cur.execute("SELECT vv.idFile, vvt.name, vv.idType FROM videoversion vv LEFT JOIN videoversiontype vvt ON vv.idType = vvt.id WHERE vv.idMedia=? AND vv.media_type='movie' AND vv.itemType=?",
+                        (id_movie, self.video_version_item_type))
             rows = cur.fetchall()
             existing_versions = []
             used_names = set()
@@ -516,43 +575,48 @@ class KodiDatabase:
             type_id = self.get_video_version_type_id(final_name)
             
             # Insert
-            # itemType=0 (Version)
             # idType is the FK to videoversiontype
-            cur.execute("INSERT INTO videoversion (idFile, idMedia, media_type, itemType, idType) VALUES (?, ?, 'movie', 0, ?)", 
-                       (id_file, id_movie, type_id))
-            self.conn.commit()
+            cur.execute("INSERT INTO videoversion (idFile, idMedia, media_type, itemType, idType) VALUES (?, ?, 'movie', ?, ?)",
+                       (id_file, id_movie, self.video_version_item_type, type_id))
 
         except Exception as e:
             log(f"Error _handle_movie_version_merge: {e}", xbmc.LOGERROR)
+            raise
 
     def get_video_version_type_id(self, version_name):
         if not version_name: 
             return 40400 # Default
         
-        try:
-            cur = self.cursor()
-            # Check if type exists
-            cur.execute("SELECT id FROM videoversiontype WHERE name=?", (version_name,))
-            row = cur.fetchone()
-            if row: return row[0]
-            
-            # Create new type (owner=2 usually means user created/addon)
-            cur.execute("INSERT INTO videoversiontype (name, owner, itemType) VALUES (?, 2, 0)", (version_name,))
-            return cur.lastrowid
-        except Exception as e:
-            # Fallback for older Kodi versions without this table
-            log(f"Error get_video_version_type_id: {e}", xbmc.LOGERROR)
-            return 40400
+        cur = self.cursor()
+        cur.execute("SELECT id FROM videoversiontype WHERE name=? AND itemType=?",
+                    (version_name, self.video_version_item_type))
+        row = cur.fetchone()
+        if row: return row[0]
+        cur.execute("INSERT INTO videoversiontype (name, owner, itemType) VALUES (?, 2, ?)",
+                    (version_name, self.video_version_item_type))
+        return cur.lastrowid
 
 
     def save_movie(self, id_file, details, file_path="", merge_versions=False):
-        if not self.conn: return None
+        if not self.conn:
+            raise RuntimeError("Kodi database is not connected")
+        try:
+            id_movie = self._save_movie(id_file, details, file_path, merge_versions)
+            self.conn.commit()
+            return id_movie
+        except Exception:
+            self.conn.rollback()
+            raise
+
+    def _save_movie(self, id_file, details, file_path, merge_versions):
         cur = self.cursor()
         info = details.get('info', {})
         available_art = details.get('available_art', {})
+        if not info.get('title'):
+            raise ValueError("电影缺少标题，无法保存到媒体库")
         
         # --- MERGE VERSION LOGIC ---
-        if merge_versions:
+        if merge_versions and self.video_version_item_type is not None:
             tmdb_id = None
             if 'tmdb' in details.get('uniqueids', {}):
                 tmdb_id = details['uniqueids']['tmdb']
@@ -581,15 +645,22 @@ class KodiDatabase:
             cur.execute("INSERT INTO movie (idFile) VALUES (?)", (id_file,))
             id_movie = cur.lastrowid
             
-            # Kodi 19+ Video Versions (Asset management)
-            # VideoAssetType::VERSION = 0
-            # VIDEO_VERSION_ID_DEFAULT = 40400
-            try:
+        # Kodi 21+ requires a version link for a movie to appear in the library.
+        if self.video_version_item_type is not None:
+            cur.execute("""SELECT vv.idMedia, vv.media_type, vv.itemType, vv.idType,
+                           vvt.name, vvt.itemType FROM videoversion vv
+                           LEFT JOIN videoversiontype vvt ON vvt.id=vv.idType
+                           WHERE vv.idFile=?""", (id_file,))
+            version = cur.fetchone()
+            if version is None:
                 cur.execute("INSERT INTO videoversion (idFile, idMedia, media_type, itemType, idType) VALUES (?, ?, ?, ?, ?)",
-                            (id_file, id_movie, 'movie', 0, 40400))
-            except: 
-                # Older Kodi versions might not have this table
-                pass
+                            (id_file, id_movie, 'movie', self.video_version_item_type, 40400))
+            elif version[0] != id_movie or version[1] != 'movie':
+                raise RuntimeError("电影文件已关联到其他媒体库条目")
+            elif version[2] != self.video_version_item_type or version[5] != self.video_version_item_type:
+                type_id = 40400 if version[3] == 40400 else self.get_video_version_type_id(version[4])
+                cur.execute("UPDATE videoversion SET itemType=?, idType=? WHERE idFile=?",
+                            (self.video_version_item_type, type_id, id_file))
 
         c00 = info.get('title', '')
         c01 = info.get('plot', '')
@@ -650,13 +721,10 @@ class KodiDatabase:
             c00=?, c01=?, c02=?, c03=?, c06=?, c08=?, c10=?, c11=?, c12=?, c13=?, c14=?, c15=?, c16=?, c18=?, c19=?, c20=?, c21=?, c22=?, c23=?, premiered=?, idSet=?
             WHERE idMovie=?"""
         
-        try:
-            cur.execute(sql, (
-                c00, c01, c02, c03, c06, c08, c10, c11, c12, c13, c14, c15, c16, c18, c19, c20, c21, c22, c23, premiered, id_set,
-                id_movie
-            ))
-        except Exception as e:
-            log(f"DB Error updating movie: {e}", xbmc.LOGERROR)
+        cur.execute(sql, (
+            c00, c01, c02, c03, c06, c08, c10, c11, c12, c13, c14, c15, c16, c18, c19, c20, c21, c22, c23, premiered, id_set,
+            id_movie
+        ))
         
         cur.execute("DELETE FROM genre_link WHERE media_id=? AND media_type='movie'", (id_movie,))
         for g in info.get('genre', []): self.add_link('genre', g, id_movie, 'movie')
@@ -698,8 +766,7 @@ class KodiDatabase:
              uid = cur.lastrowid
              if u_type == 'tmdb': default_unique_id = uid
         if default_unique_id:
-             try: cur.execute("UPDATE movie SET c09=? WHERE idMovie=?", (default_unique_id, id_movie))
-             except: pass
+             cur.execute("UPDATE movie SET c09=? WHERE idMovie=?", (default_unique_id, id_movie))
 
         cur.execute("DELETE FROM art WHERE media_id=? AND media_type='movie'", (id_movie,))
         
@@ -724,7 +791,6 @@ class KodiDatabase:
                 cur.execute("INSERT INTO art (media_id, media_type, type, url) VALUES (?, ?, ?, ?)",
                            (id_movie, 'movie', art_type, url))
         
-        self.conn.commit()
         return id_movie
 
     def _xml_escape(self, s):
@@ -928,11 +994,21 @@ class KodiScraperSimulation:
 
         try:
             cur = self.db.cursor()
-            # Load files that have a movie entry OR are linked as a video version.
-            # Kodi clears the movie table when library is reset, but leaves files table intact.
-            # Using just files table would cause false positives (thinking files are already scraped).
-            query = "SELECT DISTINCT p.strPath, f.strFilename FROM files f JOIN path p ON f.idPath = p.idPath LEFT JOIN movie m ON m.idFile = f.idFile LEFT JOIN videoversion vv ON vv.idFile = f.idFile WHERE m.idFile IS NOT NULL OR vv.idFile IS NOT NULL"
-            cur.execute(query)
+            if self.db.video_version_item_type is None:
+                cur.execute("SELECT DISTINCT strPath, strFilename FROM movie_view WHERE c00 IS NOT NULL AND c00<>''")
+            else:
+                # Kodi 21's movie_view excludes extras. Read all valid assets
+                # linked to a visible default movie so extras are not rescanned
+                # and incomplete/hidden movie records remain eligible for retry.
+                cur.execute("""SELECT DISTINCT p.strPath, f.strFilename
+                    FROM videoversion vv
+                    JOIN videoversiontype vvt ON vvt.id=vv.idType AND vvt.itemType=vv.itemType
+                    JOIN files f ON f.idFile=vv.idFile
+                    JOIN path p ON p.idPath=f.idPath
+                    JOIN movie_view mv ON mv.idMovie=vv.idMedia AND mv.isDefaultVersion=1
+                    WHERE vv.media_type='movie' AND vv.itemType IN (?, ?)
+                        AND mv.c00 IS NOT NULL AND mv.c00<>''""",
+                            (self.db.video_version_item_type, self.db.video_version_item_type + 1))
             rows = cur.fetchall()
             
             count = 0
@@ -1141,6 +1217,13 @@ class KodiScraperSimulation:
         Finds the latest or active MyVideos database in Kodi userdata.
         """
         db_dir = translatePath("special://database")
+        # Kodi 22 exposes the active database name, which also avoids selecting
+        # a newer leftover database after a downgrade or profile change.
+        if hasattr(xbmc, 'getDatabaseName'):
+            db_name = xbmc.getDatabaseName('videos')
+            if db_name:
+                db_path = os.path.join(db_dir, db_name + '.db')
+                return db_path if xbmcvfs.exists(db_path) else None
         try:
             files = xbmcvfs.listdir(db_dir)[1] # returns (dirs, files)
         except:
@@ -1220,6 +1303,12 @@ class KodiScraperSimulation:
             # We need to detect the full database name (base + version).
             base_name = result['database'] if result['database'] else "MyVideos"
             detected = False
+
+            if hasattr(xbmc, 'getDatabaseName'):
+                db_name = xbmc.getDatabaseName('videos')
+                if db_name:
+                    result['database'] = db_name
+                    return result
 
             # Try to detect by querying MySQL for existing databases matching base_name*
             try:
@@ -1805,24 +1894,31 @@ class KodiScraperSimulation:
                 details = None # Clear details to trigger failure block below
 
             if details and not is_failed:
-                self.stats_success += 1
-                if self.db:
-                    try:
-                        # Ensure thread safety for DB writes (Main Thread)
-                        f_dir = os.path.dirname(f_path)
-                        id_path = self.db.get_or_create_path(f_dir)
-                        id_file = self.db.get_or_create_file(f_path, id_path)
-                        self.db.save_movie(id_file, details, f_path, merge_versions=merge_vers)
-                        info_obj = details.get('info', {})
-                        year = info_obj.get('year', '')
-                        if not year and info_obj.get('premiered'):
-                            try: year = str(info_obj.get('premiered'))[:4]
-                            except: pass
-                        scraped_title = f"{info_obj.get('title', 'Unknown')}({year})"
-                        log(f"Saved to DB: {scraped_title}", xbmc.LOGINFO)
-                    except Exception as e:
-                        log(f"DB Save Error for {f_path}: {e}", xbmc.LOGERROR)
-            else:
+                try:
+                    if not self.db or not self.db.conn:
+                        raise RuntimeError("Kodi 数据库未连接，无法保存电影")
+                    # Ensure thread safety for DB writes (Main Thread)
+                    f_dir = os.path.dirname(f_path)
+                    id_path = self.db.get_or_create_path(f_dir)
+                    id_file = self.db.get_or_create_file(f_path, id_path)
+                    id_movie = self.db.save_movie(id_file, details, f_path, merge_versions=merge_vers)
+                    if id_movie is None:
+                        raise RuntimeError("保存电影未返回媒体库 ID")
+                    info_obj = details.get('info', {})
+                    year = info_obj.get('year', '')
+                    if not year and info_obj.get('premiered'):
+                        try: year = str(info_obj.get('premiered'))[:4]
+                        except: pass
+                    scraped_title = f"{info_obj.get('title', 'Unknown')}({year})"
+                    log(f"Saved to DB: {scraped_title}", xbmc.LOGINFO)
+                    self.stats_success += 1
+                except Exception as e:
+                    if self.db and self.db.conn:
+                        self.db.conn.rollback()
+                    is_failed = True
+                    failure_history = [f"媒体库写入失败: {e}"]
+                    log(f"DB Save Error for {f_path}: {e}", xbmc.LOGERROR)
+            if not details or is_failed:
                 self.stats_failed += 1
                 log(f"Task Failed or Returned None for {f_path}", xbmc.LOGWARNING)
                 if not failure_history:
@@ -2116,11 +2212,12 @@ class KodiScraperSimulation:
                     log(f"Using SQLite database: {db_path}", xbmc.LOGINFO)
                 else:
                     self.db = None
-                    log("No Kodi Database found. Simulation only.", xbmc.LOGWARNING)
+                    raise RuntimeError("未找到 Kodi 视频数据库，无法保存电影")
             
             if self.db:
                 # Load path cache dynamically
                 self.load_path_cache()
+                self.db.repair_legacy_video_versions(self.path_cache)
             
             self.load_scraped_files()
             
